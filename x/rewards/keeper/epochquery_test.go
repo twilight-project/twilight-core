@@ -100,6 +100,26 @@ func TestEpochBoundariesDistinguishesAbsenceFromCorruption(t *testing.T) {
 		require.Equal(t, codes.Internal, status.Code(err))
 	})
 
+	// A refusal to walk is OutOfRange, never NotFound: the epoch was not looked
+	// for and found missing. The horizon counts scheduled entries (#182), and no
+	// transaction can create one today, so only a directly written schedule
+	// reaches it.
+	t.Run("a walk past the horizon is out of range, not absent", func(t *testing.T) {
+		k, ctx := historyKeeper(t, anchor(1, minLength))
+		const entries = 1_001
+		for epoch := uint64(2); epoch < 2+entries; epoch++ {
+			require.NoError(t, k.ScheduledEpochConfigs.Set(ctx, epoch,
+				types.ScheduledEpochConfig{EffectiveEpoch: epoch, EpochLengthBlocks: minLength}))
+		}
+		qs := keeper.NewQueryServer(k)
+		_, err := qs.EpochBoundaries(ctx, &types.QueryEpochBoundariesRequest{EpochNumber: 2 + entries})
+		require.Equal(t, codes.OutOfRange, status.Code(err))
+
+		resp, err := qs.EpochBoundaries(ctx, &types.QueryEpochBoundariesRequest{EpochNumber: 500})
+		require.NoError(t, err, "an epoch inside the horizon still answers")
+		require.Equal(t, 1+499*uint64(minLength), resp.StartHeight)
+	})
+
 	t.Run("epoch zero is rejected as an argument", func(t *testing.T) {
 		qs, ctx, _ := epochQueryFixture(t)
 		_, err := qs.EpochBoundaries(ctx, &types.QueryEpochBoundariesRequest{EpochNumber: 0})

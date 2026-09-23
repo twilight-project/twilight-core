@@ -254,22 +254,38 @@ func (k Keeper) EpochEndHeight(ctx context.Context, epoch uint64) (uint64, error
 // the block path never need this — BeginBlock asks only about the next epoch,
 // whose start no schedule can move — so it is a query-side helper.
 //
-// maxSteps bounds the walk. Beyond it the answer is refused rather than
-// approximated: a boundary outside the supported derivation horizon is a
-// deterministic not-found, never an invented or clamped height.
+// The walk visits schedule entries, not epochs. Between two entries the length is
+// constant and the start height is the same closed-form recurrence history uses,
+// so the work is bounded by how many entries lie between the governing version
+// and the target — never by how many epochs do. Counting epochs instead made the
+// cost, and the horizon below, a function of chain age: on a chain with a single
+// version anchored at genesis every boundary past the horizon was refused, past
+// epochs included (#182).
+//
+// maxSteps bounds how many scheduled entries the walk crosses. Beyond it the
+// answer is refused rather than approximated: a boundary outside the supported
+// derivation horizon is a deterministic refusal, never an invented or clamped
+// height.
 func (k Keeper) ProjectEpochStartHeight(ctx context.Context, epoch, maxSteps uint64) (uint64, error) {
 	version, err := k.epochConfigVersionFor(ctx, epoch)
 	if err != nil {
 		return 0, err
 	}
 
-	// Walk forward from the governing version, applying each scheduled length
-	// change that falls strictly between it and the target epoch.
-	cursor := version.EffectiveEpoch
-	height := version.EffectiveStartHeight
-	length := version.EpochLengthBlocks
+	// Entries strictly after the governing version and at or before the target.
+	// An entry AT the target does not move the target's own start — that is fixed
+	// by the length of the epoch before it — but it is still read and validated,
+	// exactly as a walk that reached it would have.
+	rng := new(collections.Range[uint64]).StartExclusive(version.EffectiveEpoch).EndInclusive(epoch)
+	iter, err := k.ScheduledEpochConfigs.Iterate(ctx, rng)
+	if err != nil {
+		return 0, types.ErrInvalidState.Wrapf(
+			"scheduled epoch configurations could not be read: %v", err)
+	}
+	defer iter.Close()
 
-	for steps := uint64(0); cursor < epoch; steps++ {
+	segment := version
+	for steps := uint64(0); iter.Valid(); iter.Next() {
 		if steps >= maxSteps {
 			// Not ErrEpochConfigNotFound: the walk was refused, not exhausted. The
 			// epoch may well have a configuration — this query simply will not
@@ -279,30 +295,37 @@ func (k Keeper) ProjectEpochStartHeight(ctx context.Context, epoch, maxSteps uin
 				"epoch %d lies beyond the supported projection horizon of %d scheduled steps",
 				epoch, maxSteps)
 		}
-		next, err := checked.AddUint64(cursor, 1)
+		steps++
+
+		next, err := iter.Key()
 		if err != nil {
-			return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows", epoch)
+			return 0, types.ErrInvalidState.Wrapf(
+				"scheduled epoch configuration key could not be read: %v", err)
 		}
-		height, err = checked.AddUint64(height, length)
+		scheduled, err := iter.Value()
 		if err != nil {
-			return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows", epoch)
-		}
-		scheduled, err := k.ScheduledEpochConfigs.Get(ctx, next)
-		switch {
-		case err == nil:
-			if err := ValidateScheduledEpochConfigRecord(next, scheduled); err != nil {
-				return 0, err
-			}
-			length = scheduled.EpochLengthBlocks
-		case errors.Is(err, collections.ErrNotFound):
-			// No change at this boundary; the current length continues.
-		default:
 			return 0, types.ErrInvalidState.Wrapf(
 				"scheduled epoch configuration at epoch %d could not be read: %v", next, err)
 		}
-		cursor = next
+		if err := ValidateScheduledEpochConfigRecord(next, scheduled); err != nil {
+			return 0, err
+		}
+		height, err := epochStartFrom(segment, next)
+		if err != nil {
+			return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows: %v", epoch, err)
+		}
+		segment = types.EpochConfigVersion{
+			EffectiveEpoch:       next,
+			EffectiveStartHeight: height,
+			EpochLengthBlocks:    scheduled.EpochLengthBlocks,
+		}
 	}
-	return height, nil
+
+	start, err := epochStartFrom(segment, epoch)
+	if err != nil {
+		return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows: %v", epoch, err)
+	}
+	return start, nil
 }
 
 // latestEpochConfigVersion returns the newest history entry, which is also the
