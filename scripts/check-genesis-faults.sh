@@ -47,7 +47,10 @@
 # faults suite testing a stale shape is the same silent-green problem one level
 # up.
 #
-# No chain is started. This needs only the binary, jq, and a temp directory.
+# No chain is run. The two --initchain cases start the binary against a
+# throwaway home just long enough for the ABCI handshake (about a second each,
+# loopback only, ephemeral ports), and it never produces a block. This needs only
+# the binary, jq, and a temp directory.
 #
 set -euo pipefail
 
@@ -113,6 +116,50 @@ GOOD="$WORK/genesis.good.json"
 jq '.consensus.params.block.max_gas="50000000" | .app_state.coreslot.params.min_active_slots="2"' \
   "$HOME_DIR/config/genesis.json" >"$GOOD" || abort "could not finish the baseline genesis"
 
+AUTH_ADDR="$(addr auth)"; EAUTH_ADDR="$(addr eauth)"; OP1_ADDR="$(addr op1)"
+[[ -n "$AUTH_ADDR" && -n "$EAUTH_ADDR" && -n "$OP1_ADDR" ]] || abort "could not read the baseline addresses"
+
+# Module-account addresses, WRITTEN OUT rather than derived. The checker derives
+# them (sha256(name)[:20], bech32 by the binary); deriving them the same way here
+# would make a wrong derivation agree with itself. These are the values the chain
+# itself names when it refuses them at InitChain — the --initchain case below
+# re-proves that on every run for the rewards account.
+REWARDS_MODULE_ADDR=twilight1245yut9zht8q4hz39sd0lzqtzkuw5us5pd3c3u
+FEE_COLLECTOR_ADDR=twilight17xpfvakm2amg962yls6f84z3kell8c5ltxtf5t
+AUTHORITY_MODULE_ADDR=twilight17te68tpa0etfn4cmlqryw06uqh5qc2tp2fracm
+ZERO_ADDR=twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgugkct
+
+# The checker's required inputs, each with the value the baseline satisfies. The
+# abort tests below iterate this list, so a new required input that is added
+# here is tested for refusing to default automatically.
+REQUIRED_VARS="GC_CHAIN_ID GC_ACTIVE_SLOTS GC_MAX_GAS GC_MIN_ACTIVE_SLOTS GC_DISTRIBUTION_METHOD GC_AUTHORITY GC_EMERGENCY_AUTHORITY"
+required_value() {
+  case "$1" in
+    GC_CHAIN_ID) printf '%s' "$CHAIN_ID" ;;
+    GC_ACTIVE_SLOTS) printf '2' ;;
+    GC_MAX_GAS) printf '50000000' ;;
+    GC_MIN_ACTIVE_SLOTS) printf '2' ;;
+    GC_DISTRIBUTION_METHOD) printf 'DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS' ;;
+    GC_AUTHORITY) printf '%s' "$AUTH_ADDR" ;;
+    GC_EMERGENCY_AUTHORITY) printf '%s' "$EAUTH_ADDR" ;;
+    *) abort "no baseline value for required input $1" ;;
+  esac
+}
+# All required inputs except the one named (pass "" for all of them), as
+# NAME=value words for env.
+required_env() {
+  local v
+  REQ_ENV=()
+  for v in $REQUIRED_VARS; do
+    if [[ "$v" != "$1" ]]; then REQ_ENV+=("$v=$(required_value "$v")"); fi
+  done
+}
+
+# Extra checker flags for the case being run (only ever --initchain). A plain
+# string so an empty value expands to nothing under bash 3.2's `set -u`, where
+# an empty array does not.
+CHECKER_FLAGS=""
+
 # Every label the checker has ever printed, across the baseline and every mutant.
 # This is what the coverage assertion at the end is derived from, so a check added
 # to check-genesis.sh with no fault case here is DETECTED rather than assumed.
@@ -131,9 +178,10 @@ record_labels() {
 run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WORK/out, returns exit code
   local g="$1"; shift
   local rc=0
-  env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 \
-      GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS "$@" \
-    "$CHECKER" "$g" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
+  required_env ""
+  # shellcheck disable=SC2086 # CHECKER_FLAGS is deliberately word-split
+  env "${REQ_ENV[@]}" "$@" \
+    "$CHECKER" "$g" --bin "$BIN" $CHECKER_FLAGS >"$WORK/out" 2>&1 || rc=$?
   record_labels
   return $rc
 }
@@ -181,8 +229,52 @@ mutate "unlimited block gas is caught" \
   '.consensus.params.block.max_gas="-1"' trap.max_gas_finite
 mutate "a wrong-but-finite max_gas is caught" \
   '.consensus.params.block.max_gas="40000000"' decision.max_gas
+mutate "zero block gas is caught (it admits no transaction)" \
+  '.consensus.params.block.max_gas="0"' trap.max_gas_finite GC_MAX_GAS=0
+mutate "a negative block gas other than -1 is caught" \
+  '.consensus.params.block.max_gas="-5"' trap.max_gas_finite GC_MAX_GAS=-5
+mutate "an absent max_gas is caught, not read as finite" \
+  'del(.consensus.params.block.max_gas)' trap.max_gas_finite
 mutate "a display denom in a bank amount is caught" \
-  '.app_state.bank.supply=[{denom:"twlt",amount:"1"}]' trap.display_denom_leak
+  '.app_state.bank.supply=[{denom:"twlt",amount:"1"}]' trap.bank_denoms_native
+# The old check was a denylist of the two display spellings; each of these got
+# past it. The check is now "every denom IS utwlt".
+mutate "a near-miss denom (utwtl) in a balance is caught" \
+  ".app_state.bank.balances=[{address:\"$OP1_ADDR\",coins:[{denom:\"utwtl\",amount:\"1\"}]}]" \
+  trap.bank_denoms_native
+mutate "a mixed-case display denom (Twlt) is caught" \
+  '.app_state.bank.supply=[{denom:"Twlt",amount:"1"}]' trap.bank_denoms_native
+mutate "an upper-cased base denom (uTWLT) is caught" \
+  '.app_state.bank.supply=[{denom:"uTWLT",amount:"1"}]' trap.bank_denoms_native
+# One over the cap, stated and in the balances, so the comparison is exact at a
+# magnitude where a double is not.
+mutate "a starting supply one above max_supply is caught" \
+  ".app_state.bank.balances=[{address:\"$OP1_ADDR\",coins:[{denom:\"utwlt\",amount:\"21000000000001\"}]}]
+   | .app_state.bank.supply=[{denom:\"utwlt\",amount:\"21000000000001\"}]" \
+  trap.supply_within_max
+mutate "balances above max_supply with no stated supply are caught" \
+  ".app_state.bank.balances=[{address:\"$OP1_ADDR\",coins:[{denom:\"utwlt\",amount:\"30000000000000\"}]}]
+   | .app_state.bank.supply=[]" \
+  trap.supply_within_max
+mutate "a module account as a slot payout address is caught" \
+  ".app_state.coreslot.slots[0].payout_address=\"$FEE_COLLECTOR_ADDR\"" \
+  trap.payout_not_module_account
+mutate "an upper-cased module account as a payout address is caught" \
+  ".app_state.coreslot.slots[1].payout_address=\"$(printf '%s' "$FEE_COLLECTOR_ADDR" | tr '[:lower:]' '[:upper:]')\"" \
+  trap.payout_not_module_account
+mutate "the zero address as a slot payout address is caught" \
+  ".app_state.coreslot.slots[0].payout_address=\"$ZERO_ADDR\"" \
+  trap.payout_not_module_account
+mutate "a module account as a slot settlement address is caught" \
+  ".app_state.coreslot.slots[0].settlement_address=\"$REWARDS_MODULE_ADDR\"" \
+  trap.settlement_not_module_account
+# Decided as the treasury, so the decision check agrees and only the
+# module-account rule can be what refuses it.
+mutate "a module account as the treasury is caught" \
+  ".app_state.rewards.params.treasury_address=\"$AUTHORITY_MODULE_ADDR\"
+   | .app_state.rewards.reward_config_versions[0].treasury_address=\"$AUTHORITY_MODULE_ADDR\"
+   | .app_state.rewards.current_epoch_config.treasury_address=\"$AUTHORITY_MODULE_ADDR\"" \
+  trap.treasury_not_module_account GC_TREASURY_ADDRESS="$AUTHORITY_MODULE_ADDR"
 mutate "a treasury share with no address is caught" \
   '.app_state.rewards.params.emission_treasury_share_bps="100"
    | .app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="100"' \
@@ -294,6 +386,19 @@ mutate "an entitlement at genesis" \
   '.app_state.rewards.slot_entitlements=[{slot_id:"1"}]' fresh.slot_entitlements_empty
 mutate "a settlement at genesis" \
   '.app_state.mining.settlements=[{slot_id:"1"}]' fresh.settlements_empty
+# The reproduced hand-over: native validation accepts this, the node starts, and
+# the nominee's accept-authority takes the primary role after launch.
+mutate "a pending authority nomination at genesis" \
+  ".app_state.coreslot.pending_authority_transfers=[{role:\"AUTHORITY_ROLE_PRIMARY\",
+     transfer:{nominee:\"$OP1_ADDR\",nominated_height:\"1\"}}]" \
+  fresh.pending_authority_transfers_empty
+mutate "a reserved consensus address at genesis" \
+  '.app_state.coreslot.reserved_consensus_addresses=[{cons_address:"AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+     slot_id:"1",reserved_until:"100000",reason:"lockout"}]' \
+  fresh.reserved_consensus_addresses_empty
+mutate "a pending key rotation at genesis" \
+  '.app_state.coreslot.pending_key_rotations=[{slot_id:"1",requested_height:"1",effective_height:"2"}]' \
+  fresh.pending_key_rotations_empty
 
 echo
 echo "==> the remaining immutable bounds"
@@ -382,6 +487,56 @@ mutate "a malformed emergency authority address" \
   decision.emergency_authority_shape
 mutate "something only the chain itself rejects" \
   '.app_state.coreslot.slots[0].slot_id="0"' native.validate
+# Replaced by a well-formed, distinct, fundable address: shape and distinctness
+# both still pass, so only the stated decision can catch it.
+mutate "an authority other than the one decided" \
+  ".app_state.coreslot.params.authority=\"$OP1_ADDR\"" decision.authority
+mutate "an emergency authority other than the one decided" \
+  ".app_state.coreslot.params.emergency_authority=\"$OP1_ADDR\"" decision.emergency_authority
+# Types-level validation accepts this; the slots were activated at height 1 and
+# the chain now starts at 5, which panics at InitChain. The binary's
+# coreslot-genesis validate reads the document's initial_height and refuses it.
+mutate "an initial_height the slots were not activated at" \
+  '.initial_height="5"' native.coreslot_genesis
+
+# ---- the InitChain dry-run -------------------------------------------------------------------
+#
+# Runs the node, so it is kept to the two cases that prove it: the baseline must
+# come through it, and a genesis every static validator accepts must not. The
+# static module-account check fires on this mutant too; the point is that the
+# CHAIN refuses it, which is also what makes the hard-coded module address above
+# a checked value rather than an assumed one.
+echo
+echo "==> InitChain dry-run (--initchain)"
+CHECKER_FLAGS="--initchain"
+if run_checker "$GOOD"; then
+  if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+    pass "the baseline genesis completes InitChain"
+  else
+    fail "the baseline genesis completes InitChain" "the checker passed without running the dry-run"
+  fi
+else
+  fail "the baseline genesis completes InitChain" "$(sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -A2 'FAIL' | head -6)"
+fi
+mutate "a module-account settlement address panics InitChain" \
+  ".app_state.coreslot.slots[1].settlement_address=\"$REWARDS_MODULE_ADDR\"" \
+  native.initchain
+if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -A1 "FAIL  \[native.initchain\]" | grep -q "module account: $REWARDS_MODULE_ADDR"; then
+  pass "  and the chain names the same module account the checker does"
+else
+  fail "  and the chain names the same module account the checker does" \
+    "the InitChain refusal did not name $REWARDS_MODULE_ADDR as a module account"
+fi
+CHECKER_FLAGS=""
+
+rc=0
+required_env ""
+env "${REQ_ENV[@]}" "$CHECKER" "$GOOD" --initchain >"$WORK/out" 2>&1 || rc=$?
+if (( rc == 2 )) && grep -q -- "--initchain needs --bin" "$WORK/out"; then
+  pass "--initchain without --bin is a usage error"
+else
+  fail "--initchain without --bin is a usage error" "exit $rc: $(head -2 "$WORK/out")"
+fi
 
 # ---- the checker must refuse to guess ------------------------------------------------------
 #
@@ -389,33 +544,54 @@ mutate "something only the chain itself rejects" \
 # to abort rather than default.
 echo
 echo "==> required decisions must abort, not default"
-# All four required inputs, each omitted in turn while the other three are supplied,
-# so the abort is attributable to THAT variable rather than to a generally broken
-# invocation.
+# Every required input, each omitted in turn while ALL the others are supplied
+# with the values the baseline satisfies.
+#
+# Both halves of that matter, and an earlier version of this loop had neither. It
+# omitted GC_DISTRIBUTION_METHOD from every invocation, so each run aborted on
+# THAT variable before reaching the one under test, and it asserted only a
+# non-zero exit. A mutant defaulting GC_MAX_GAS, or GC_DISTRIBUTION_METHOD,
+# passed the whole suite. So the abort must now name the variable under test —
+# bash's `${VAR:?}` reports "line N: VAR: ..." — and with the other inputs
+# correct, a checker that defaulted the omitted one would instead run to a pass.
 #
 # GC_MAX_GAS matters most here. It has no shipped default — `twilightd init` writes
 # -1 — so a default would be this script inventing a ratification decision that
 # #160, #107 and #167 all say has not been made. A run passing because the caller
 # forgot the variable is indistinguishable from one passing because the value was
 # ratified, which is the exact confusion this tool exists to prevent.
-for var in GC_CHAIN_ID GC_ACTIVE_SLOTS GC_MAX_GAS GC_MIN_ACTIVE_SLOTS; do
+for var in $REQUIRED_VARS; do
   rc=0
-  env -u "$var" \
-    $([[ "$var" != GC_CHAIN_ID ]]         && echo "GC_CHAIN_ID=$CHAIN_ID") \
-    $([[ "$var" != GC_ACTIVE_SLOTS ]]     && echo "GC_ACTIVE_SLOTS=2") \
-    $([[ "$var" != GC_MAX_GAS ]]          && echo "GC_MAX_GAS=50000000") \
-    $([[ "$var" != GC_MIN_ACTIVE_SLOTS ]] && echo "GC_MIN_ACTIVE_SLOTS=2") \
-    "$CHECKER" "$GOOD" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
-  if (( rc != 0 )); then pass "unset $var aborts"
-  else fail "unset $var aborts" "checker ran anyway and exited 0"; fi
+  required_env "$var"
+  env -u "$var" "${REQ_ENV[@]}" "$CHECKER" "$GOOD" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
+  if (( rc == 0 )); then
+    fail "unset $var aborts" "checker ran anyway and exited 0"
+  elif grep -Eq "line [0-9]+: ${var}: " "$WORK/out"; then
+    pass "unset $var aborts, naming $var"
+  else
+    fail "unset $var aborts, naming $var" "exit $rc, but not the refusal for $var: $(head -2 "$WORK/out")"
+  fi
 done
 
 # Running without the chain's own validator must not be reported as a clean pass.
+# Every input is supplied and the genesis is the passing baseline, so the ONLY
+# thing that can make this exit non-zero is the missing --bin: every check that
+# runs must pass, and the run must end in the refusal itself.
 rc=0
-env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 \
-  "$CHECKER" "$GOOD" >"$WORK/out" 2>&1 || rc=$?
-if (( rc != 0 )); then pass "omitting --bin is not a clean pass"
-else fail "omitting --bin is not a clean pass" "checker exited 0 without running twilightd validate"; fi
+required_env ""
+env "${REQ_ENV[@]}" "$CHECKER" "$GOOD" >"$WORK/out" 2>&1 || rc=$?
+sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" >"$WORK/out.plain"
+if (( rc == 0 )); then
+  fail "omitting --bin is not a clean pass" "checker exited 0 without running twilightd validate"
+elif grep -q "FAIL  \[" "$WORK/out.plain"; then
+  fail "omitting --bin is not a clean pass" "the run failed a check, so it proves nothing about --bin: $(grep 'FAIL  \[' "$WORK/out.plain" | head -3)"
+elif ! grep -q "summary  [0-9]* passed, 0 failed" "$WORK/out.plain"; then
+  fail "omitting --bin is not a clean pass" "the run never reached its summary (exit $rc): $(tail -2 "$WORK/out.plain")"
+elif tail -1 "$WORK/out.plain" | grep -q "re-run with --bin"; then
+  pass "omitting --bin is not a clean pass (every check passed, and it still refused)"
+else
+  fail "omitting --bin is not a clean pass" "exit $rc without the --bin refusal: $(tail -1 "$WORK/out.plain")"
+fi
 
 # ---- the coverage contract: declared == exercised == targeted -----------------------------
 #
