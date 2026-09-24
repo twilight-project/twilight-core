@@ -156,6 +156,22 @@ counter is a consensus-state change and is tracked separately.
 | `twilight_coreslot_pending_key_rotations` | | Consensus-key rotations queued and not yet effective | 0 except during a rotation |
 | `twilight_coreslot_pending_authority_nomination` | `role` = `primary` \| `emergency` | An authority handover is nominated and not yet accepted or canceled | 0 except during a handover |
 
+`twilight_coreslot_pending_authority_nomination` is the alertable signal for an
+authority handover: it is 1 from the block a nomination is committed until it is
+accepted or canceled (a replacement nomination keeps it at 1). It says **that** a handover is open,
+not **to whom** — metric labels carry no addresses. To see who is nominated, ask
+the chain:
+
+```bash
+twilightd coreslot-query pending-authority-transfers --node <rpc> --output json
+```
+
+The query returns one entry per role with a nomination pending (`role`,
+`transfer.nominee`, `transfer.nominated_height`); `"transfers": []` means nothing
+is pending, and it is a success rather than an error. The gauge and the query read
+the same stored record, so at the same height a firing alert always has an entry
+behind it.
+
 ### Exporter health
 
 | Metric | Labels | Meaning |
@@ -175,6 +191,7 @@ testnet's 360-block epochs; scale to your epoch length.
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
+| Authority handover open | `twilight_coreslot_pending_authority_nomination == 1` | Every nomination should map to a rotation you are running. An unexpected one is the first visible sign of a stolen authority key (there is no timelock: the nominee can accept in the next block). Page, then run `pending-authority-transfers` to see who is nominated |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 

@@ -147,7 +147,8 @@ Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on
 **x/coreslot** (`twilight.coreslot.v1.Query`, base `/twilight/coreslot/v1`): `params`,
 `slots/{slot_id}`, `slots`, **`active-slots`**, `operators/{operator_address}`,
 `consensus/{consensus_address}` (hex), `pending-key-rotations`, `last-applied-validators`,
-`reserved-consensus-address/{consensus_address}` (hex), `slots/{slot_id}/reward-weight`.
+`reserved-consensus-address/{consensus_address}` (hex), `slots/{slot_id}/reward-weight`,
+`pending-authority-transfers`.
 
 **x/mining** (`twilight.mining.v1.Query`, base `/twilight/mining/v1`):
 `settlements/{slot_id}/{epoch}`, `slots/{slot_id}/open-settlements`, `settlement-clock`,
