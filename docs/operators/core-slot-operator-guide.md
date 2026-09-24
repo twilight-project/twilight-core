@@ -115,6 +115,39 @@ set). `gen-consensus-key.sh` writes a throwaway node home and prints the new
 pubkey plus the path to its `priv_validator_key.json` (needed when that key will
 actually sign — see [key rotation](#7-key-rotation)).
 
+### Updating operator metadata
+
+A slot carries five metadata fields — `moniker`, `identity`, `website`,
+`security_contact`, `details` (each at most 512 bytes). The operator updates them
+by flag; fields not named keep their current value, and an explicit empty value
+clears one. The message is signed by the slot's **operator** key, so use the
+`$AUTH` flags above with `--from` set to that key:
+
+```bash
+twilightd coreslot update-metadata <slot-id> --website https://example.org --from newop ...   # only website changes
+twilightd coreslot update-metadata <slot-id> --website "" --from newop ...                    # only website is cleared
+```
+
+The command reads the slot's current record from `--node` first and prints the
+full record it is about to store (to stderr) before generating or broadcasting,
+so it needs a node even with `--generate-only` and does not run `--offline`. At
+least one field must be named, `--from` must be the slot's operator, and the
+record as it would be stored must pass the 512-byte limit (a field that is
+already over it on-chain must be named so it is replaced).
+
+A `--generate-only` document is a **snapshot of that read**: broadcasting it
+later, after the record has changed, writes the snapshot back over the newer
+record. The live path (read, then sign and broadcast in one command) is
+protected by the account sequence — two updates racing from the same operator
+cannot both land on the same base.
+
+> **Why the read-first step:** the chain-side message carries the whole record
+> and the keeper stores it whole. A client that sends only the field it means to
+> change clears the other four — which is what this command used to do (#181).
+> Any other client building `MsgUpdateOperatorMetadata` must still send all five
+> fields. The older `update-metadata <slot-id> <moniker>` form still works and now
+> means `--moniker`; it is deprecated.
+
 ## 4. Activation
 
 ```bash
