@@ -148,7 +148,10 @@ from what settlement actually does, without anything failing loudly.
   no entry. A stored nomination that cannot be read is `500`, never an empty list. The
   incumbent is not repeated in the entry: it is `params.authority` /
   `params.emergency_authority` at the same height (pin both reads with
-  `x-cosmos-block-height`).
+  `x-cosmos-block-height`; a height the node has pruned is an error, not an empty list).
+  It shows only nominations that wait: a nominate and accept that land in the same block
+  are never visible here, so detect a completed rotation by comparing `params` against the
+  addresses you expect (or from the `coreslot_authority_accepted` event).
 - **`CoreSlotByConsensusAddress` / `ReservedConsensusAddress` take a hex-encoded
   consensus address** (the keeper rejects bech32 `valcons`). A real hex value is
   available from CometBFT `:26657/validators` (`validators[].address`).
