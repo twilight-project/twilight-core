@@ -215,18 +215,28 @@ block-gas-faults:
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
 #   GC_MAX_GAS=<ratified value> GC_MIN_ACTIVE_SLOTS=2 \
 #   GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS \
-#     make check-genesis GENESIS=path/to/genesis.json
+#   GC_AUTHORITY=<primary authority> GC_EMERGENCY_AUTHORITY=<emergency authority> \
+#     make check-genesis GENESIS=path/to/genesis.json [NO_INITCHAIN=1]
 #
 # GC_MAX_GAS has no default on purpose: `twilightd init` writes -1, and no finite
 # value is ratified in this repository (#160, #107, #167). The verifier must never
-# be the thing that supplies one.
+# be the thing that supplies one. The two authorities have none either: nothing in
+# the file can say whether they are the keys the launch agreed on (#185).
+#
+# The run includes an InitChain dry-run by default: the binary is started on the
+# genesis in a throwaway home until the ABCI handshake completes (about a second),
+# which is the only check that asks InitGenesis itself. NO_INITCHAIN=1 skips it.
+# The file must be in the SDK genesis form (`twilightd init`'s shape); the
+# CometBFT form served by a node's /genesis RPC is refused, because the chain
+# reads it through a fallback the checker cannot follow (#198).
 check-genesis: build
 	@test -n "$(GENESIS)" || { echo "set GENESIS=<path to genesis.json>" >&2; exit 2; }
-	./scripts/check-genesis.sh "$(GENESIS)" --bin build/twilightd
+	./scripts/check-genesis.sh "$(GENESIS)" --bin build/twilightd $(if $(filter 1,$(NO_INITCHAIN)),--no-initchain)
 
 # Proves every check in check-genesis.sh fires on its own fault. Builds its
-# baseline genesis with the real binary rather than a committed fixture, starts
-# no chain, and runs in CI — a verifier that stops verifying reports GREEN.
+# baseline genesis with the real binary rather than a committed fixture, and runs
+# in CI — a verifier that stops verifying reports GREEN. No chain is run; a few
+# cases start the binary only as far as the InitChain handshake.
 check-genesis-faults:
 	./scripts/check-genesis-faults.sh
 
