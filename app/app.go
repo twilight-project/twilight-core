@@ -357,6 +357,11 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 // api.swagger is enabled. It overrides runtime.App.RegisterAPIRoutes (which does not
 // serve Swagger). When the API server is disabled this method is never called, and
 // when swagger=false the Swagger registration is a no-op, so REST is unaffected.
+//
+// It also publishes the build identity gauge (see telemetry.go): the API server
+// is where /metrics is served and telemetry is initialized before it starts, so
+// this is the earliest point at which the gauge is scrapeable — before the
+// node's first commit refreshes it.
 func (a *App) RegisterAPIRoutes(apiSvr *serverapi.Server, apiConfig serverconfig.APIConfig) {
 	a.App.RegisterAPIRoutes(apiSvr, apiConfig)
 	if apiConfig.Swagger {
@@ -364,6 +369,7 @@ func (a *App) RegisterAPIRoutes(apiSvr *serverapi.Server, apiConfig serverconfig
 			panic(err)
 		}
 	}
+	emitBuildInfo()
 }
 
 func (a *App) ExportAppStateAndValidators(_ bool, _ []string, modulesToExport []string) (servertypes.ExportedApp, error) {
