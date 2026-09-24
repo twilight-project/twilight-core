@@ -131,7 +131,15 @@ twilightd coreslot update-metadata <slot-id> --website "" --from newop ...      
 The command reads the slot's current record from `--node` first and prints the
 full record it is about to store (to stderr) before generating or broadcasting,
 so it needs a node even with `--generate-only` and does not run `--offline`. At
-least one field must be named.
+least one field must be named, `--from` must be the slot's operator, and the
+record as it would be stored must pass the 512-byte limit (a field that is
+already over it on-chain must be named so it is replaced).
+
+A `--generate-only` document is a **snapshot of that read**: broadcasting it
+later, after the record has changed, writes the snapshot back over the newer
+record. The live path (read, then sign and broadcast in one command) is
+protected by the account sequence — two updates racing from the same operator
+cannot both land on the same base.
 
 > **Why the read-first step:** the chain-side message carries the whole record
 > and the keeper stores it whole. A client that sends only the field it means to
