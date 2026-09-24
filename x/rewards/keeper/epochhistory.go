@@ -312,7 +312,7 @@ func (k Keeper) ProjectEpochStartHeight(ctx context.Context, epoch, maxSteps uin
 		}
 		height, err := epochStartFrom(segment, next)
 		if err != nil {
-			return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows: %v", epoch, err)
+			return 0, unrepresentableEpoch(epoch)
 		}
 		segment = types.EpochConfigVersion{
 			EffectiveEpoch:       next,
@@ -323,9 +323,20 @@ func (k Keeper) ProjectEpochStartHeight(ctx context.Context, epoch, maxSteps uin
 
 	start, err := epochStartFrom(segment, epoch)
 	if err != nil {
-		return 0, types.ErrInvalidState.Wrapf("epoch %d projection overflows: %v", epoch, err)
+		return 0, unrepresentableEpoch(epoch)
 	}
 	return start, nil
+}
+
+// unrepresentableEpoch is the refusal for a projected epoch whose start height
+// does not fit in a uint64. The epoch number is caller-supplied, so this is not
+// a statement about stored state: the history is sound, the question simply has
+// no representable answer. It shares the horizon sentinel because both are the
+// chain declining to compute, never a corruption, and a public query must not
+// be able to make the node report its own state as untrustworthy.
+func unrepresentableEpoch(epoch uint64) error {
+	return types.ErrEpochBeyondProjectionHorizon.Wrapf(
+		"epoch %d lies beyond the representable height range", epoch)
 }
 
 // latestEpochConfigVersion returns the newest history entry, which is also the

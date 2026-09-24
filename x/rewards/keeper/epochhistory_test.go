@@ -376,11 +376,14 @@ func TestProjectionIsNotBoundedByChainAge(t *testing.T) {
 		require.Equal(t, 1+4999*uint64(minLength), start)
 	})
 
-	t.Run("overflow far from genesis is corruption, not a horizon", func(t *testing.T) {
+	// The epoch number is caller-supplied. A start height that does not fit is
+	// a question with no representable answer, not evidence that stored history
+	// is broken, so it must never surface as the corruption class.
+	t.Run("an unrepresentable start height is a refusal, not corruption", func(t *testing.T) {
 		const maxUint64 = ^uint64(0)
 		_, err := k.ProjectEpochStartHeight(ctx, maxUint64, 1)
-		require.ErrorIs(t, err, types.ErrInvalidState)
-		require.NotErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
+		require.ErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
+		require.NotErrorIs(t, err, types.ErrInvalidState)
 	})
 }
 
@@ -389,7 +392,11 @@ func TestProjectionIsNotBoundedByChainAge(t *testing.T) {
 // at its boundary — for every epoch across a schedule with several entries.
 func TestProjectionMatchesTheEpochWalk(t *testing.T) {
 	k, ctx := historyKeeper(t, continuousHistory()...)
-	schedule := map[uint64]uint64{12: maxLength, 13: minLength, 40: 500, 41: 500, 90: maxLength}
+	// Entries at 5 and 9 sit exactly on a history version's effective epoch. They
+	// are stale — consumption would have removed them — and must be ignored for
+	// the epochs those versions govern: the range starts strictly after the
+	// governing version, and only the walk from an OLDER version may cross them.
+	schedule := map[uint64]uint64{5: 500, 9: 500, 12: maxLength, 13: minLength, 40: 500, 41: 500, 90: maxLength}
 	for epoch, length := range schedule {
 		require.NoError(t, k.ScheduledEpochConfigs.Set(ctx, epoch,
 			types.ScheduledEpochConfig{EffectiveEpoch: epoch, EpochLengthBlocks: length}))
