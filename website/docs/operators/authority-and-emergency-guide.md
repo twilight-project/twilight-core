@@ -45,6 +45,34 @@ Pausing does not stop epoch time. Epoch numbering advances and epochs still
 finalize; a fully paused epoch counts zero reward-enabled blocks and emits
 nothing. Pausing does not touch pending params or closed epochs.
 
+## Rotating an authority, and seeing a rotation in flight
+
+Handing either authority to a new key is two steps: the current holder
+nominates, and the nominee accepts by signing with the new key. Nothing moves
+until acceptance, and the holder can withdraw or replace a nomination until then.
+
+```bash
+twilightd tx coreslot nominate-authority primary twilight1<successor> --from <authority> ...
+twilightd tx coreslot accept-authority primary --from <successor> ...
+twilightd tx coreslot cancel-authority-nomination primary --from <authority> ...
+```
+
+Between the two steps, the pending-nomination query shows who is nominated for
+each role:
+
+```bash
+twilightd coreslot-query pending-authority-transfers --node <rpc> --output json
+# REST: GET /twilight/coreslot/v1/pending-authority-transfers
+```
+
+It returns one entry per role with a nomination pending (`role`,
+`transfer.nominee`, `transfer.nominated_height`), primary first. `"transfers": []`
+is the ordinary answer: nothing is in flight for either role. It is a success,
+never a "not found". The incumbent is `coreslot-query params` at the same height.
+
+Both the incumbent and the successor should check this before the successor
+accepts: it must show exactly the intended role and nominee.
+
 ## Recovery
 
 - **Accidental pause:** `resume` the same flags. Settlement re-enabled past a
@@ -55,6 +83,14 @@ nothing. Pausing does not touch pending params or closed epochs.
   compromised emergency key can deny-of-service (pause) but cannot mint, redirect
   payouts, or change immutable fields; a compromised authority key can queue
   params at the next boundary but cannot change denom/cap or pause.
+- **Unexpected nomination:** a nomination you did not make is the first visible
+  sign that a role's key is in someone else's hands (or that the chain launched
+  from a genesis carrying one). There is no timelock, so the nominee can accept
+  in the next block. Check `pending-authority-transfers` for who is nominated,
+  cancel with `cancel-authority-nomination` while the incumbent key is still
+  yours, then rotate the key. Alert on the
+  `twilight_coreslot_pending_authority_nomination` gauge (see
+  [Monitoring](monitoring.md)) so this is not found by chance.
 
 ## What not to do
 

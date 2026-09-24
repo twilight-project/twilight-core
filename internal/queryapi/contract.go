@@ -102,6 +102,7 @@ var Contract = []Entry{
 	{Module: "coreslot", Command: "selection-policy", Request: "QuerySelectionPolicyRequest", RPC: "SelectionPolicy", Args: []string{"1"}},
 	{Module: "coreslot", Command: "selection-policy-version", Request: "QuerySelectionPolicyVersionRequest", RPC: "SelectionPolicyVersion", Args: []string{"1", "1"}},
 	{Module: "coreslot", Command: "selection-policy-at-height", Request: "QuerySelectionPolicyAtHeightRequest", RPC: "SelectionPolicyAtHeight", Args: []string{"1", "1"}},
+	{Module: "coreslot", Command: "pending-authority-transfers", Request: "QueryPendingAuthorityTransfersRequest", RPC: "PendingAuthorityTransfers"},
 }
 
 // ForModule returns the pinned entries for one surface.

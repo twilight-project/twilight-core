@@ -21,6 +21,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/app"
+	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
@@ -179,6 +180,9 @@ type agedChain struct {
 	// history stays inside the first halving tier, and every block was
 	// reward-enabled, so each epoch emitted the full subsidy for its length.
 	epochEmission sdkmath.Int
+	// nominations are the authority handovers left in flight at the head, in
+	// role order: one per role at a seeded horizon, none at the bare one.
+	nominations []*coreslottypes.PendingAuthorityTransferEntry
 }
 
 // bootAgedChain produces a chain whose open epoch at the head is
@@ -260,6 +264,35 @@ func bootAgedChain(t *testing.T, h horizon) *agedChain {
 	}
 	require.NoError(t, rewards.SetState(ctx, state))
 
+	// --- authority handovers in flight ----------------------------------------
+	// At a seeded horizon both roles are left nominated and never accepted, so the
+	// pending-nomination query is asked with its collection full and the record
+	// thousands of epochs old by the head. Through the message server, so each
+	// record is the one a nomination writes. Every horizon of a mode carries the
+	// same two, which keeps its cost comparable across age; the bare horizon
+	// carries none and so asks the empty answer.
+	var nominations []*coreslottypes.PendingAuthorityTransferEntry
+	if h.ledger != ledgerBare {
+		nominate := coreslotkeeper.NewMsgServer(coreslot)
+		for _, handover := range []struct {
+			role      coreslottypes.AuthorityRole
+			incumbent string
+			nominee   string
+		}{
+			{coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY, app.AuthorityAddress(), acc(0x5a)},
+			{coreslottypes.AuthorityRole_AUTHORITY_ROLE_EMERGENCY, app.EmergencyAuthorityAddress(), acc(0x5b)},
+		} {
+			_, err := nominate.NominateAuthority(ctx, &coreslottypes.MsgNominateAuthority{
+				Authority: handover.incumbent, Role: handover.role, Nominee: handover.nominee,
+			})
+			require.NoError(t, err)
+			nominations = append(nominations, &coreslottypes.PendingAuthorityTransferEntry{
+				Role:     handover.role,
+				Transfer: &coreslottypes.PendingAuthorityTransfer{Nominee: handover.nominee, NominatedHeight: ctx.BlockHeight()},
+			})
+		}
+	}
+
 	chain.commitThrough(t, chain.head+agedEpochsDriven*epochLength+5)
 
 	headEpoch := h.openEpoch + agedEpochsDriven
@@ -269,6 +302,7 @@ func bootAgedChain(t *testing.T, h horizon) *agedChain {
 		headEpoch:      headEpoch,
 		headEpochStart: 1 + (headEpoch-1)*length,
 		epochEmission:  epochEmission,
+		nominations:    nominations,
 	}
 	assertAllRewardsInvariants(t, chain.app, chain.headContext())
 	return aged
@@ -752,6 +786,17 @@ func (c *agedChain) horizonCases() []horizonCase {
 		{name: "coreslot selection policy at height 1", method: "/twilight.coreslot.v1.Query/SelectionPolicyAtHeight",
 			req:    &coreslottypes.QuerySelectionPolicyAtHeightRequest{SlotId: 1, AtHeight: 1},
 			verify: c.verifyGenesisPolicy},
+		// Nothing pending is a success with an empty list, never an absence.
+		{name: "coreslot pending authority transfers", method: "/twilight.coreslot.v1.Query/PendingAuthorityTransfers",
+			req: &coreslottypes.QueryPendingAuthorityTransfersRequest{},
+			verify: func(t *testing.T, reply any) {
+				transfers := reply.(*coreslottypes.QueryPendingAuthorityTransfersResponse).Transfers
+				if len(c.nominations) == 0 {
+					require.Empty(t, transfers)
+					return
+				}
+				require.Equal(t, c.nominations, transfers, "both handovers, in role order, as nominated")
+			}},
 	}
 }
 
