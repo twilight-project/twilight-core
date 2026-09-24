@@ -130,9 +130,11 @@ func BasicManager() module.BasicManager {
 //     The per-block work ceiling is TW-004's finite max_gas, which is not
 //     ratified here.
 //   - TW-005 is MITIGATED, NOT CLOSED, and #147 stays open.
-//   - It reaches only NEWLY INITIALIZED nodes. The SDK writes config.toml from
-//     this value only when the file is absent; a node whose config.toml already
-//     exists keeps whatever it was given, and needs an operator to edit it.
+//   - It reaches a node through config.toml. `twilightd init` writes this value
+//     (and rewrites it under --overwrite). An existing file that SETS
+//     max_txs_bytes keeps its value; one that OMITS the key inherits this bound,
+//     because the SDK unmarshals the file onto the configuration supplied here.
+//     The same rule governs timeout_commit; see targetBlockInterval.
 const MempoolBacklogBlocks = 4
 
 // nodeConfig is the CometBFT node configuration this binary hands the SDK, which
@@ -179,40 +181,58 @@ func nodeConfig() *cmtcfg.Config {
 // multiplies a per-block subsidy by a year of blocks is a PRE-HALVING rate, and
 // only equals the year's emission while the first halving falls outside it.
 //
-// # This is deliberately NOT a behavior change
+// # What this changes, exactly
 //
-// The SDK already produces 5 seconds. InterceptConfigsPreRunHandler overrides
-// TimeoutCommit to 5s whenever the config it is handed still holds CometBFT's
-// default of 1s — "the SDK is opinionated about those comet values"
-// (server/util.go). A fresh `twilightd init` therefore already wrote 5s before
-// this existed, and removing this line today changes nothing an operator sees.
+// Nothing on a fresh node. InterceptConfigsPreRunHandler, when no config.toml
+// exists yet, overrides TimeoutCommit to 5s if the config it is handed still
+// holds CometBFT's 1s default — "the SDK is opinionated about those comet values"
+// (server/util.go). A fresh `twilightd init` therefore wrote 5s before this
+// existed, and the config.toml it writes is byte-identical with and without this
+// line.
 //
-// What it changes is WHERE the value comes from. Without it, the block pacing that
-// sets this chain's monetary schedule is an SDK implementation detail that happens
-// to coincide with DefaultTargetBlockTimeSeconds, and a future SDK revising its
-// opinion would move the emission rate with no local signal. Setting it here takes
-// ownership, and the SDK's override no longer applies because the value it guards
-// on is no longer the CometBFT default.
+// One thing on an existing node: a config.toml that OMITS timeout_commit now
+// inherits 5s where it used to inherit CometBFT's 1s (the "What it is NOT"
+// section below has the full table). That is a real change, and the intended
+// one: 1 second was never the pacing this chain's reward schedule is written
+// against.
+//
+// What it changes for everyone is WHERE the value comes from. Without it, the
+// block pacing that sets this chain's monetary schedule is an SDK implementation
+// detail that happens to coincide with DefaultTargetBlockTimeSeconds, and an SDK
+// revising its opinion would move the emission rate with no local signal. Setting
+// it here takes ownership: the SDK's override is bypassed because the value it
+// guards on is no longer the CometBFT default. That protection was verified by
+// mutation — with the SDK's 5s changed to 3s, a node built without this line
+// wrote 3s and a node built with it wrote 5s.
+//
+// The bypass has one edge. If DefaultTargetBlockTimeSeconds were ever 1, this
+// would hand the SDK exactly the 1s it guards on: fresh nodes would get the SDK's
+// 5s while existing homes omitting the key got 1s. The test refuses that value
+// outright, so the edge fails loudly rather than splitting the network's pacing.
 //
 // # The limit of that coupling, stated precisely
 //
 // This binds the node's pacing to the Go DEFAULT constant, NOT to the chain's
 // configured target_block_time_seconds. It cannot bind to the configured value:
-// this runs in PersistentPreRunE, before any genesis file exists to read. So a
-// network launched with target_block_time_seconds = 10 still paces at 5s, and no
-// consensus rule notices — that field drives no computation anywhere.
+// this runs in PersistentPreRunE, which for `init` is before any genesis exists
+// and for `start` is before the node has opened one. So a network launched with
+// target_block_time_seconds = 10 still paces at 5s, and no consensus rule notices
+// — that field drives no computation anywhere.
 //
-// Nothing here closes the genesis side of that gap: no check in this repository
-// compares a genesis-declared target_block_time_seconds against the pacing nodes
-// actually run. A genesis verifier doing exactly that is proposed in #171 and is
-// not merged, so the gap is open rather than covered.
+// The genesis side of that gap is half covered. scripts/check-genesis.sh (#172)
+// compares a genesis-declared target_block_time_seconds against the ratified
+// decision it is given. Nothing compares any node's config.toml against either,
+// so the node side stays open.
 //
-// The test asserts the OUTCOME rather than this line. What that detects, precisely:
-// it fails when the pacing a node writes DIVERGES from the reward default — an SDK
-// opinion moving alone, a CometBFT default moving alone, this helper changed alone.
-// It does NOT fail when the reward default itself moves, because helper and
-// expectation both follow it. That case is a deliberate economic change and belongs
-// under review, not under a test that would only restate an identity.
+// The test asserts the OUTCOME rather than this line. What that detects,
+// precisely: it fails when CometBFT moves its 1s default, when this helper stops
+// matching the reward default, and when the reward default is CometBFT's own 1s
+// (the edge above). It does NOT detect the SDK revising its 5s opinion, because
+// this line stops that opinion from reaching the file at all — that is the
+// protection, not something the test observes. And it does NOT fail when the
+// reward default moves to any other value, because helper and expectation both
+// follow it: that case is a deliberate economic change and belongs under review,
+// not under a test that would only restate an identity.
 //
 // # What it is NOT
 //
@@ -225,9 +245,10 @@ func nodeConfig() *cmtcfg.Config {
 // "fresh nodes only" but not nil — worth stating exactly, because the obvious
 // summary is wrong.
 //
-// The SDK writes a config.toml only when none exists. When one does, it unmarshals
-// that file ONTO the configuration supplied here, so a key the file SETS wins and a
-// key it OMITS inherits this value:
+// `twilightd init` writes config.toml from the configuration supplied here, and
+// rewrites it under --overwrite; `start` never writes it. When a file exists, the
+// SDK unmarshals it ONTO the configuration supplied here, so a key the file SETS
+// wins and a key it OMITS inherits this value:
 //
 //	existing file says timeout_commit = "3s"  ->  3s, before and after
 //	existing file omits timeout_commit        ->  1s before, 5s after

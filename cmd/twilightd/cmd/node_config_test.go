@@ -129,13 +129,20 @@ func TestInitWritesCustomizedNodeConfig(t *testing.T) {
 		// file. Verified by doing exactly that and diffing the written config.toml.
 		//
 		// It is worth having anyway, because what must not silently change is the
-		// VALUE an operator's node ends up pacing at. This fails if the SDK revises
-		// its opinion, if CometBFT moves its default, or if the reward schedule's
-		// assumed block time moves away from the node's — whichever supplies it.
+		// VALUE an operator's node ends up pacing at. This fails if CometBFT moves
+		// its default, or if the reward schedule's assumed block time moves away
+		// from what the node writes. It does NOT detect the SDK revising its 5s
+		// opinion: nodeConfig sets the value before the SDK sees it, so that
+		// opinion never reaches the file (verified by mutating the SDK to 3s).
 		require.Equal(t, 1000*time.Millisecond, defaults.Consensus.TimeoutCommit,
 			"the upstream default this exists to replace has moved; re-derive before touching this")
 
 		want := time.Duration(rewardstypes.DefaultTargetBlockTimeSeconds) * time.Second
+		// The one value that defeats the bypass. Handing the SDK its own 1s makes
+		// it override fresh nodes to 5s while existing homes that omit the key run
+		// at 1s — two pacings on one network. Refused here so it cannot ship.
+		require.NotEqual(t, defaults.Consensus.TimeoutCommit, want,
+			"the reward default equals CometBFT's own default, which the SDK would override on fresh nodes only")
 		// Deliberately NOT phrased as "the customization never reached the SDK".
 		// That cause cannot be established here — the SDK supplies the same value
 		// when nodeConfig sets nothing — and claiming it would send a reader
