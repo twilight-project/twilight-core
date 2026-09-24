@@ -126,10 +126,11 @@ func TestQueriesClassifyAbsenceAsNotFound(t *testing.T) {
 // hit it about three weeks in. The horizon now counts scheduled entries crossed,
 // so an epoch far from genesis answers with the same recurrence history uses.
 //
-// The refusal itself is still OutOfRange rather than NotFound; that contract is
-// held at the handler (TestEpochBoundariesDistinguishesAbsenceFromCorruption),
-// because no transaction can yet write the schedule entries needed to reach it
-// from a booted chain.
+// The horizon refusal is held at the handler
+// (TestEpochBoundariesDistinguishesAbsenceFromCorruption), because no transaction
+// can yet write the schedule entries needed to reach it from a booted chain. The
+// other refusal — an epoch too large to have a representable start height — is
+// reachable from any client and is pinned end to end below.
 func TestAnOldEpochIsNotRefusedForItsAge(t *testing.T) {
 	chain := bootPinnedChain(t)
 	chain.commitThrough(t, 3)
@@ -146,6 +147,29 @@ func TestAnOldEpochIsNotRefusedForItsAge(t *testing.T) {
 	require.Equal(t, near.EpochLengthBlocks, far.EpochLengthBlocks)
 	require.Equal(t, near.StartHeight+(100_000_000-2)*near.EpochLengthBlocks, far.StartHeight,
 		"with no schedule, a far epoch is the history recurrence, not a refusal")
+}
+
+// TestARefusalToComputeIsNotAnAbsence covers the fourth answer through the gRPC
+// path a consumer uses.
+//
+// An epoch whose start height does not fit in a uint64 has no derivable
+// boundaries. That is the chain declining to compute, so it arrives as
+// OutOfRange: not NotFound, which would say the epoch has no configuration, and
+// not Internal, which would let any client make the node report its own state
+// as untrustworthy (the classification Internal is reserved for).
+func TestARefusalToComputeIsNotAnAbsence(t *testing.T) {
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, 3)
+	querier := newHeaderQuerier(chain.app)
+
+	unrepresentable := classificationCase{
+		name:   "rewards epoch whose start height overflows",
+		method: "/twilight.rewards.v1.Query/EpochBoundaries",
+		req:    &rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 1 << 62},
+		want:   codes.OutOfRange,
+	}
+	require.Equal(t, codes.OutOfRange, classify(t, querier, unrepresentable),
+		"an unrepresentable boundary is a refusal, not a missing configuration and not corruption")
 }
 
 // TestQueriesClassifyMalformedRequestsAsInvalidArgument covers the arm that is
