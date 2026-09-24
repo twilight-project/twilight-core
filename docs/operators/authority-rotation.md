@@ -34,8 +34,8 @@ is inert and correctable rather than terminal.
 
 **What this does not do:** it does not protect you against someone who already holds your
 authority key. There is no timelock, so an attacker nominates an address they control and accepts
-in the next block. You are guaranteed no reaction window. Protect the key itself — a k-of-n
-multisig account works here with no chain change.
+— in the same block, if both transactions are sent together. You are guaranteed no reaction
+window. Protect the key itself — a k-of-n multisig account works here with no chain change.
 
 ---
 
@@ -124,9 +124,13 @@ pending-nomination query, for both roles at once:
 
 ```bash
 twilightd coreslot-query pending-authority-transfers --output json
-# the same, generated tree:   twilightd query coreslot pending-authority-transfers
 # the same, REST:             curl $REST/twilight/coreslot/v1/pending-authority-transfers
 ```
+
+The generated tree has the same query (`twilightd query coreslot pending-authority-transfers`),
+but when nothing is pending it prints `{}` rather than `{"transfers":[]}`: its encoder drops an
+empty list. It still shows every pending entry, but scripts should use `coreslot-query` or REST,
+whose empty answer is explicit.
 
 ```json
 {
@@ -146,17 +150,45 @@ twilightd coreslot-query pending-authority-transfers --output json
 - `nominated_height` is the block the nomination was included in (for a nomination carried in
   genesis, whatever height the document stated). Add `--height <h>` to see
   what was pending at an earlier height, and read `params` at the same height for the incumbent.
+  A height the node has pruned is an error, not an empty answer — do not read it as "nothing
+  was pending".
 - The nominating address is not stored. It is the incumbent at `nominated_height`, and it is also
   in that transaction's `coreslot_authority_nominated` event.
 
-**Treat an entry you did not expect as an incident.** A nomination can only be made by the
-current holder of the role, so an unexplained one means the role's key is being used by someone
-else — or the chain launched from a genesis that carried a nomination nobody approved. There is
-no timelock: a nominee can accept in the next block. Cancel it immediately with
-`cancel-authority-nomination` (signed by the incumbent key, so this works only while that key is
-still yours), then treat the key as compromised and rotate it to a fresh one. Nodes export
-`twilight_coreslot_pending_authority_nomination{role}`, which is 1 while a nomination is pending;
-alert on it (see the monitoring guide), and use this query to see **who** is nominated.
+### Detecting a rotation you did not make
+
+**The check that always works is the holder itself.** Record the authority and emergency
+addresses you expect, and compare them against the chain:
+
+```bash
+twilightd coreslot-query params --output json | jq '.params | {authority, emergency_authority}'
+```
+
+Any difference is a rotation that happened. Every completed handover also emits a
+`coreslot_authority_accepted` event (`authority_role`, `previous_authority`, `authority`), so an
+indexer or event subscriber can catch the moment it happens.
+
+**The pending query, and its gauge, only see a nomination that waits.** Nodes export
+`twilight_coreslot_pending_authority_nomination{role}`, which is 1 while a nomination is pending,
+and this query shows **who** is nominated. That catches the honest two-step, a nomination carried
+in genesis, and an attacker who nominates and waits. It does **not** catch someone who holds the
+key and rotates in one go: a nomination and its acceptance can land in the **same block**, and
+then no committed height ever shows a pending entry and the gauge never leaves 0. Use the pending
+view to confirm your own handovers and to spot a waiting one; use the holder comparison above to
+detect a completed one.
+
+**If an entry appears that you did not expect**, find out where it came from before acting:
+
+- A nomination carried in a **launch genesis** is not evidence of a stolen key — it was in the
+  document the chain started from. It is still dangerous (its nominee can accept at any height),
+  so withdraw it with `cancel-authority-nomination` and fix whatever let it through sign-off.
+- Otherwise a nomination can only have been made by the role's current holder, so treat the key
+  as being used by someone else. Cancelling is not enough: the attacker holds the same key and can
+  simply nominate again. Instead, **nominate a fresh key you control and have it accept**,
+  preferably both transactions back to back so they land in the same block. The new nomination
+  replaces the pending one in a single transaction, and once the fresh key accepts, the stolen key
+  no longer holds the role. This only works while the incumbent key still holds the role — check
+  `params` first.
 
 > **Note on `update-params`:** the output of `coreslot-query params` cannot currently be fed
 > straight back into `coreslot update-params` — the query renders numbers as JSON strings and the
