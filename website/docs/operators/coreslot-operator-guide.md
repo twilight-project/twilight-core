@@ -31,6 +31,21 @@ address is snapshotted into the entitlement **at finalization**. Changing it
 affects future epochs' entitlements, not already-finalized ones. Funds for a
 finalized epoch always go to the address recorded at that epoch's finalization.
 
+## Updating your slot metadata
+
+A slot's five metadata fields (`moniker`, `identity`, `website`,
+`security_contact`, `details`; at most 512 bytes each) are updated by flag with
+`twilightd coreslot update-metadata <slot-id> --website … --details …`. Fields
+not named keep their current value; an explicit empty value (`--website ""`)
+clears that field; at least one field must be named. The command reads the
+current record from `--node` first and prints the full record it will store
+before generating or broadcasting, so it needs a node even with
+`--generate-only` and does not run `--offline`.
+
+The chain-side message still carries and stores the **whole** record, so any
+client other than this command must send all five fields or it will clear the
+ones it leaves out.
+
 ## Suspend / remove implications for rewards
 
 Suspending or removing a slot stops it from earning new active-block credit
