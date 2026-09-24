@@ -23,24 +23,41 @@
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
 #   GC_MAX_GAS=<ratified> GC_MIN_ACTIVE_SLOTS=2 \
 #   GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS \
-#     scripts/check-genesis.sh path/to/genesis.json [--bin build/twilightd]
+#   GC_AUTHORITY=twilight1... GC_EMERGENCY_AUTHORITY=twilight1... \
+#     scripts/check-genesis.sh path/to/genesis.json --bin build/twilightd [--initchain]
+#
+# --bin is required for a passing verdict. Without it the chain's own validators,
+# `coreslot-genesis validate`, and the module-account checks (which need the
+# binary to derive bech32 addresses) cannot run, and the run exits non-zero even
+# when everything it could check passed.
+#
+# --initchain additionally starts the binary against a throwaway home holding
+# this genesis and waits for the ABCI handshake to complete, which is the point
+# InitChain — every module's InitGenesis — has run. The other checks predict what
+# InitGenesis will refuse; this is the only one that asks it. It costs about a
+# second on a small genesis (bounded at 120s), binds only 127.0.0.1 on ephemeral
+# ports, never proposes or signs (the probe's key is not in the validator set),
+# and deletes the home afterwards.
 #
 set -euo pipefail
 
 if [[ "${1:-}" == "--list-checks" ]]; then LIST_ONLY=1; else LIST_ONLY=0; fi
 GENESIS="${1:-}"
 BIN=""
+INITCHAIN=0
 shift || true
 while (( $# )); do
   case "$1" in
     --bin)
       [[ $# -ge 2 ]] || { echo "--bin needs a path to the twilightd binary" >&2; exit 2; }
       BIN="$2"; shift 2 ;;
+    --initchain) INITCHAIN=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-(( LIST_ONLY )) || [[ -n "$GENESIS" ]] || { echo "usage: $0 <genesis.json> [--bin <twilightd>]" >&2; exit 2; }
+(( LIST_ONLY )) || [[ -n "$GENESIS" ]] || { echo "usage: $0 <genesis.json> --bin <twilightd> [--initchain]" >&2; exit 2; }
+(( LIST_ONLY )) || (( ! INITCHAIN )) || [[ -n "$BIN" ]] || { echo "--initchain needs --bin: it starts that binary" >&2; exit 2; }
 (( LIST_ONLY )) || [[ -f "$GENESIS" ]] || { echo "no such genesis file: $GENESIS" >&2; exit 2; }
 (( LIST_ONLY )) || command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
@@ -59,7 +76,7 @@ done
 # Adding a check without adding it here is a hard error at runtime. Adding it here
 # without a fault case fails the suite. Making one unreachable fails the suite.
 CHECK_IDS=(
-  native.validate
+  native.validate native.coreslot_genesis native.initchain
   fresh.current_epoch fresh.cumulative_emitted fresh.carry_forward_remainder
   fresh.open_reward_blocks fresh.entitlement_liability fresh.has_pending_params
   fresh.paused fresh.pause_pending
@@ -67,6 +84,8 @@ CHECK_IDS=(
   fresh.sched_epoch_empty fresh.sched_reward_empty fresh.sched_settlement_empty
   fresh.sched_distmode_empty fresh.sched_selection_empty
   fresh.finalized_epochs_empty fresh.slot_entitlements_empty fresh.settlements_empty
+  fresh.pending_authority_transfers_empty fresh.reserved_consensus_addresses_empty
+  fresh.pending_key_rotations_empty
   mirror.epoch_length mirror.subsidy mirror.emission_share mirror.treasury_address
   mirror.epoch_anchor
   snapshot.epoch_length_blocks snapshot.initial_block_subsidy snapshot.treasury_address
@@ -76,13 +95,30 @@ CHECK_IDS=(
   bound.chunks_per_settlement bound.min_payout bound.settlement_window
   bound.max_active_slots bound.selection_cooldown
   trap.treasury_address_for_share trap.slot_status_known trap.active_within_bounds
-  trap.native_denom trap.fee_denom trap.display_denom_leak trap.max_gas_finite
+  trap.native_denom trap.fee_denom trap.bank_denoms_native trap.supply_within_max
+  trap.max_gas_finite
+  trap.payout_not_module_account trap.settlement_not_module_account
+  trap.treasury_not_module_account
   decision.chain_id decision.max_gas decision.active_slots decision.min_active_slots
   decision.epoch_length decision.max_supply decision.subsidy decision.distribution_method
   decision.emission_share decision.treasury_address decision.allow_self_registration
-  decision.target_block_time decision.authority_shape
-  decision.emergency_authority_shape decision.authorities_distinct
+  decision.target_block_time decision.authority decision.emergency_authority
+  decision.authority_shape decision.emergency_authority_shape decision.authorities_distinct
 )
+
+# Every module account the app declares (app/config.go moduleAccountPermissions,
+# via app.ModuleAccountNames()). None of them may receive protocol value: the
+# chain's economic-address rule (internal/economicaddress) refuses each one as a
+# payout, settlement or treasury address at InitGenesis, which is a panic at
+# start-up rather than a validation error. The bank module's blocked set is this
+# same list — bank is wired with no blocked-accounts override — so this also
+# covers "bank-blocked".
+#
+# This is a copy of an app-side list, which is only acceptable because it cannot
+# drift silently: app/check_genesis_script_test.go parses this line and fails
+# when it differs from app.ModuleAccountNames(), or when the bank blocked set
+# contains anything it does not cover.
+MODULE_ACCOUNT_NAMES=(fee_collector coreslot-authority coreslot-emergency rewards rewards_fee_pool)
 
 # LIST_ONLY is captured before the argument shift above; re-testing $1 here would
 # read an already-consumed argument.
@@ -128,11 +164,21 @@ declared_id() {
 #                      is FROZEN at genesis — uniform can never become weighted
 #                      without an upgrade — so accepting it must be a statement
 #                      rather than a silence.
+#   GC_AUTHORITY       the primary authority admits validators, sets parameters
+#   GC_EMERGENCY_AUTHORITY  and schedules upgrades; the emergency authority can
+#                      pause rewards. Both are whoever the file says they are, so
+#                      checking only that they are well formed and distinct
+#                      accepts a genesis in which both were replaced by keys
+#                      nobody agreed to. There is no default: `twilightd init`
+#                      writes the coreslot-authority and coreslot-emergency
+#                      MODULE ACCOUNT addresses, which no key controls.
 : "${GC_CHAIN_ID:?set GC_CHAIN_ID to the chain-id this launch decided on}"
 : "${GC_ACTIVE_SLOTS:?set GC_ACTIVE_SLOTS to the number of slots that must be ACTIVE at genesis}"
 : "${GC_MAX_GAS:?set GC_MAX_GAS to the ratified block max_gas for this launch — twilightd init writes -1 and no value is ratified in-repo}"
 : "${GC_MIN_ACTIVE_SLOTS:?set GC_MIN_ACTIVE_SLOTS to the active-slot floor this launch decided on — the shipped default is 1}"
 : "${GC_DISTRIBUTION_METHOD:?set GC_DISTRIBUTION_METHOD — it is frozen at genesis, so it must be stated even when the shipped default is the answer}"
+: "${GC_AUTHORITY:?set GC_AUTHORITY to the primary authority address this launch decided on}"
+: "${GC_EMERGENCY_AUTHORITY:?set GC_EMERGENCY_AUTHORITY to the emergency authority address this launch decided on}"
 
 # SHIPPED-DEFAULT EXPECTATIONS — not caller launch decisions.
 #
@@ -196,6 +242,47 @@ j() {
 # skipping every check below it, including the max_gas check this exists for.
 is_num() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
 
+# ARBITRARY-PRECISION decimal arithmetic for token amounts. Amounts are JSON
+# strings precisely because they exceed what a double — jq's only number type —
+# holds exactly, and bash arithmetic is signed 64-bit and wraps silently. A
+# supply check that is off by one at 2^53 is not a supply check. Callers pass
+# strings already validated as ^[0-9]+$.
+dec_norm() { # strip leading zeros; sets DEC_OUT
+  DEC_OUT="$1"
+  while [[ ${#DEC_OUT} -gt 1 && "${DEC_OUT:0:1}" == "0" ]]; do DEC_OUT="${DEC_OUT:1}"; done
+  return 0
+}
+dec_add() { # dec_add <a> <b>; sets DEC_OUT = a + b
+  local a="$1" b="$2" out="" carry=0 x y s
+  # 15-digit limbs: two limbs plus a carry stay far below 2^63.
+  while [[ -n "$a" || -n "$b" ]]; do
+    if (( ${#a} > 15 )); then x="${a:${#a}-15}"; a="${a:0:${#a}-15}"; else x="${a:-0}"; a=""; fi
+    if (( ${#b} > 15 )); then y="${b:${#b}-15}"; b="${b:0:${#b}-15}"; else y="${b:-0}"; b=""; fi
+    s=$(( 10#$x + 10#$y + carry ))
+    carry=$(( s / 1000000000000000 ))
+    out="$(printf '%015d' $(( s % 1000000000000000 )))$out"
+  done
+  (( carry == 0 )) || out="$carry$out"
+  dec_norm "$out"
+}
+dec_le() { # dec_le <a> <b>; true when a <= b
+  local a b i x y
+  dec_norm "$1"; a="$DEC_OUT"
+  dec_norm "$2"; b="$DEC_OUT"
+  # Explicit returns throughout: a bare failing (( )) as a function's last word
+  # is an exit under `set -e` whenever the caller is not a conditional.
+  if (( ${#a} < ${#b} )); then return 0; fi
+  if (( ${#a} > ${#b} )); then return 1; fi
+  # Equal lengths: compare digit by digit rather than with [[ < ]], whose
+  # ordering is locale collation, not numeric.
+  for (( i = 0; i < ${#a}; i++ )); do
+    x="${a:i:1}"; y="${b:i:1}"
+    if (( x < y )); then return 0; fi
+    if (( x > y )); then return 1; fi
+  done
+  return 0
+}
+
 eq() { # eq <id> <label> <expected> <actual>
   if [[ "$4" == "__MISSING__" ]]; then
     bad "$1" "$2" "not present in the genesis file (expected: $3)"
@@ -233,17 +320,100 @@ printf '\033[1mcheck-genesis\033[0m  %s\n' "$GENESIS"
 # The chain's own answer. Everything below is a cross-check that produces a better
 # message; nothing below overrides this.
 section "1. native validation (authoritative)"
+WORKDIR=""; IC_PID=""
+cleanup() {
+  if [[ -n "$IC_PID" ]]; then kill "$IC_PID" 2>/dev/null || true; wait "$IC_PID" 2>/dev/null || true; fi
+  if [[ -n "$WORKDIR" ]]; then rm -rf "$WORKDIR"; fi
+  return 0
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 if [[ -n "$BIN" ]]; then
   [[ -x "$BIN" ]] || { echo "binary not executable: $BIN" >&2; exit 2; }
-  VLOG="$(mktemp "${TMPDIR:-/tmp}/check-genesis.XXXXXX")"
-  trap 'rm -f "$VLOG"' EXIT
+  WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/check-genesis.XXXXXX")"
+  VLOG="$WORKDIR/validate.log"
+  # Every binary call below that takes a home gets a throwaway one. The CLI's
+  # pre-run writes a client.toml into whatever home it resolves, and the default
+  # is the operator's real ~/.twilightd.
+  CLIHOME="$WORKDIR/cli-home"
   if "$BIN" validate "$GENESIS" >"$VLOG" 2>&1; then
     ok native.validate "twilightd validate"
   else
     bad native.validate "twilightd validate" "$(tail -3 "$VLOG")"
   fi
+
+  # `twilightd validate` is TYPES-level: each module's ValidateGenesis on its own
+  # state. It does not see the document around the state, so a genesis whose
+  # slots were activated at height 1 passes it with initial_height=5 and then
+  # panics at InitChain. The binary's own coreslot-genesis validate reads the
+  # document's initial_height and its CometBFT validator list as well. It takes
+  # only a home, so it is handed one containing nothing but this file.
+  CSHOME="$WORKDIR/coreslot-home"
+  mkdir -p "$CSHOME/config"
+  cp "$GENESIS" "$CSHOME/config/genesis.json"
+  if "$BIN" coreslot-genesis validate --home "$CSHOME" >"$VLOG" 2>&1; then
+    ok native.coreslot_genesis "twilightd coreslot-genesis validate"
+  else
+    # cobra prints the usage block before the error, so the error is the last line.
+    bad native.coreslot_genesis "twilightd coreslot-genesis validate" "$(tail -1 "$VLOG")"
+  fi
+
+  if (( INITCHAIN )); then
+    # InitChain is where each keeper's InitGenesis runs, and it refuses things no
+    # ValidateGenesis sees — a module account as a payout, settlement or treasury
+    # address is one. So start the real binary on this genesis and wait for the
+    # ABCI handshake, which completes only after InitChain has returned. A fresh
+    # home always runs InitChain; a panic in it exits the process.
+    ICHOME="$WORKDIR/initchain-home"
+    ICLOG="$WORKDIR/initchain.log"
+    if ! "$BIN" init initchain-probe --chain-id "$GC_CHAIN_ID" --home "$ICHOME" >"$ICLOG" 2>&1; then
+      bad native.initchain "InitChain dry-run" "could not create a probe home: $(tail -1 "$ICLOG")"
+    else
+      cp "$GENESIS" "$ICHOME/config/genesis.json"
+      # Loopback only, OS-assigned ports, and every optional server off, so the
+      # probe can neither collide with a node on this host nor be reached from
+      # outside it. Its generated key is not in the validator set, so it never
+      # proposes or signs.
+      "$BIN" start --home "$ICHOME" \
+        --p2p.laddr tcp://127.0.0.1:0 --rpc.laddr tcp://127.0.0.1:0 --rpc.pprof_laddr "" \
+        --p2p.pex=false --p2p.seeds "" --p2p.persistent_peers "" \
+        --grpc.enable=false --grpc-web.enable=false --api.enable=false \
+        --log_level info --log_no_color >"$ICLOG" 2>&1 &
+      IC_PID=$!
+      IC_RESULT=timeout
+      i=0
+      while (( i < 600 )); do # 600 x 0.2s = 120s
+        if grep -q "Completed ABCI Handshake" "$ICLOG"; then IC_RESULT=ok; break; fi
+        if ! kill -0 "$IC_PID" 2>/dev/null; then IC_RESULT=exited; break; fi
+        sleep 0.2
+        i=$((i + 1))
+      done
+      kill "$IC_PID" 2>/dev/null || true
+      wait "$IC_PID" 2>/dev/null || true
+      IC_PID=""
+      # A process that exited just after logging the handshake still completed it.
+      if [[ "$IC_RESULT" == "exited" ]] && grep -q "Completed ABCI Handshake" "$ICLOG"; then IC_RESULT=ok; fi
+      # The handshake line alone is not proof that InitChain ran — a home with
+      # existing state would replay instead — so its own log line must be there too.
+      if [[ "$IC_RESULT" == "ok" ]] && ! grep -q "InitChain" "$ICLOG"; then IC_RESULT=no-initchain; fi
+      case "$IC_RESULT" in
+        ok) ok native.initchain "InitChain dry-run (every module's InitGenesis accepted this genesis)" ;;
+        exited)
+          # A keeper panic, or an error the handshake returned. Either way the
+          # process then prints cobra's usage block, so the tail is not the reason.
+          IC_WHY="$(grep -m1 -E '^panic: |error during handshake|^Error: ' "$ICLOG" || true)"
+          [[ -n "$IC_WHY" ]] || IC_WHY="$(tail -1 "$ICLOG")"
+          bad native.initchain "InitChain dry-run" "the node exited before InitChain completed: $IC_WHY" ;;
+        timeout) bad native.initchain "InitChain dry-run" "no ABCI handshake within 120s: $(tail -1 "$ICLOG")" ;;
+        *) bad native.initchain "InitChain dry-run" "handshake logged but no InitChain line — this proves nothing about InitGenesis" ;;
+      esac
+    fi
+  else
+    note "InitChain was not dry-run. Add --initchain to start the binary on this genesis (about a second)."
+  fi
 else
-  note "no --bin given; the chain's own validator was NOT run. Supply --bin build/twilightd."
+  note "no --bin given; the chain's own validators were NOT run and the module-account"
+  note "checks cannot derive addresses. Supply --bin build/twilightd."
 fi
 
 # ---- 2. fresh-genesis invariants ------------------------------------------------------------
@@ -277,6 +447,21 @@ done
 eq fresh.finalized_epochs_empty "rewards.finalized_epochs is empty" "0" "$(j '.app_state.rewards.finalized_epochs | length')"
 eq fresh.slot_entitlements_empty "rewards.slot_entitlements is empty" "0" "$(j '.app_state.rewards.slot_entitlements | length')"
 eq fresh.settlements_empty "mining.settlements is empty"        "0" "$(j '.app_state.mining.settlements | length')"
+
+# In-flight coreslot operations. The native ValidateGenesis ACCEPTS each of these,
+# deliberately: an export must carry them or a restart would silently drop a
+# rotation mid-flight. In a genesis being cut for a new chain they are a hand-over
+# nobody signed. A pending authority nomination was reproduced end to end — the
+# nominee's accept-authority succeeded after launch and took the primary role
+# without the incumbent ever signing. A pending key rotation swaps a validator's
+# consensus key the same way, and a reserved consensus address locks a key out of
+# the set before anyone has used it.
+eq fresh.pending_authority_transfers_empty "coreslot.pending_authority_transfers is empty" \
+   "0" "$(j '.app_state.coreslot.pending_authority_transfers | length')"
+eq fresh.reserved_consensus_addresses_empty "coreslot.reserved_consensus_addresses is empty" \
+   "0" "$(j '.app_state.coreslot.reserved_consensus_addresses | length')"
+eq fresh.pending_key_rotations_empty "coreslot.pending_key_rotations is empty" \
+   "0" "$(j '.app_state.coreslot.pending_key_rotations | length')"
 
 # ---- 3. mirror consistency -------------------------------------------------------------------
 #
@@ -404,15 +589,152 @@ fi
 # an amount.
 eq trap.native_denom "rewards native_denom" "$GC_NATIVE_DENOM" "$(j '.app_state.rewards.params.native_denom')"
 eq trap.fee_denom "rewards fee_denom"    "$GC_NATIVE_DENOM" "$(j '.app_state.rewards.params.fee_denom')"
-LEAKED="$(jq -r '[.app_state.bank.supply[]?.denom, .app_state.bank.balances[]?.coins[]?.denom] | map(select(. == "twlt" or . == "TWLT")) | length' "$GENESIS" 2>/dev/null || echo 0)"
-eq trap.display_denom_leak "no display denom in any bank amount" "0" "$LEAKED"
-
-# Block gas must be finite. This is TW-004 and nothing else writes it.
-MAXGAS="$(j '.consensus.params.block.max_gas')"
-if [[ "$MAXGAS" == "-1" ]]; then
-  bad trap.max_gas_finite "block.max_gas is finite" "max_gas is -1 (unlimited) — TW-004 is NOT addressed in this genesis"
+#
+# Stated positively — every bank denom IS the native denom — rather than as a
+# denylist of display spellings. A denylist of "twlt" and "TWLT" let "utwtl",
+# "Twlt" and "uTWLT" through, and each of those is a token the chain never
+# accounts for. A jq failure is reported, never read as "nothing found".
+if BAD_DENOMS="$(jq -r --arg d "$GC_NATIVE_DENOM" \
+    '[.app_state.bank.supply[]?.denom, .app_state.bank.balances[]?.coins[]?.denom]
+     | map(select(. != $d) | tostring) | unique | join(",")' "$GENESIS" 2>/dev/null)"; then
+  if [[ -z "$BAD_DENOMS" ]]; then
+    ok trap.bank_denoms_native "every bank supply and balance denom is exactly $GC_NATIVE_DENOM"
+  else
+    bad trap.bank_denoms_native "every bank supply and balance denom is exactly $GC_NATIVE_DENOM" "found: $BAD_DENOMS"
+  fi
 else
-  ok trap.max_gas_finite "block.max_gas is finite ($MAXGAS)"
+  bad trap.bank_denoms_native "every bank supply and balance denom is exactly $GC_NATIVE_DENOM" "bank denoms could not be read"
+fi
+
+# The rewards supply-cap invariant: the native supply never exceeds max_supply.
+# Emission is capped against it, but nothing at genesis is — a starting supply
+# above the cap passes every validator and breaks the invariant from block 1.
+# Both the stated supply and the sum of balances are checked: bank validates that
+# they agree only when a supply is stated at all, and derives it from the
+# balances when it is not. Exact decimal arithmetic throughout (see dec_add).
+SUPPLY_WHY=""
+MAXSUP_FILE="$(j '.app_state.rewards.params.max_supply')"
+[[ "$MAXSUP_FILE" =~ ^[0-9]+$ ]] || SUPPLY_WHY="max_supply is unreadable: '$MAXSUP_FILE'"
+if [[ -z "$SUPPLY_WHY" ]]; then
+  if STATED="$(jq -r --arg d "$GC_NATIVE_DENOM" \
+      '.app_state.bank.supply[]? | select(.denom == $d) | .amount | tostring' "$GENESIS" 2>/dev/null)" \
+     && BAL_AMTS="$(jq -r --arg d "$GC_NATIVE_DENOM" \
+      '.app_state.bank.balances[]?.coins[]? | select(.denom == $d) | .amount | tostring' "$GENESIS" 2>/dev/null)"; then
+    # Summed, not taken as one entry: a duplicated supply denom is refused by
+    # native validation, and summing keeps this check from depending on that.
+    STATED_SUM=0
+    while IFS= read -r amt; do
+      if [[ -z "$amt" ]]; then continue; fi
+      if [[ "$amt" =~ ^[0-9]+$ ]]; then dec_add "$STATED_SUM" "$amt"; STATED_SUM="$DEC_OUT"
+      else SUPPLY_WHY="unreadable supply amount '$amt'"; fi
+    done <<<"$STATED"
+    BAL_SUM=0
+    while IFS= read -r amt; do
+      if [[ -z "$amt" ]]; then continue; fi
+      if [[ "$amt" =~ ^[0-9]+$ ]]; then dec_add "$BAL_SUM" "$amt"; BAL_SUM="$DEC_OUT"
+      else SUPPLY_WHY="unreadable balance amount '$amt'"; fi
+    done <<<"$BAL_AMTS"
+  else
+    SUPPLY_WHY="bank supply or balances could not be read"
+  fi
+fi
+if [[ -n "$SUPPLY_WHY" ]]; then
+  bad trap.supply_within_max "starting $GC_NATIVE_DENOM supply <= max_supply" "$SUPPLY_WHY"
+elif dec_le "$STATED_SUM" "$MAXSUP_FILE" && dec_le "$BAL_SUM" "$MAXSUP_FILE"; then
+  ok trap.supply_within_max "starting $GC_NATIVE_DENOM supply <= max_supply (stated $STATED_SUM, balances $BAL_SUM, max $MAXSUP_FILE)"
+else
+  bad trap.supply_within_max "starting $GC_NATIVE_DENOM supply <= max_supply" \
+      "stated supply $STATED_SUM, sum of balances $BAL_SUM, max_supply $MAXSUP_FILE — the supply-cap invariant is broken at genesis"
+fi
+
+# Block gas must be a working, finite ceiling. This is TW-004 and nothing else
+# writes it. Stated positively, as a positive integer: -1 is unlimited, 0 admits
+# no transaction with any gas at all, any other negative is not a ceiling, and an
+# absent key is not a decision. Testing only `!= -1` passed all four.
+MAXGAS="$(j '.consensus.params.block.max_gas')"
+if [[ "$MAXGAS" =~ ^[1-9][0-9]*$ ]]; then
+  ok trap.max_gas_finite "block.max_gas is a positive finite ceiling ($MAXGAS)"
+elif [[ "$MAXGAS" == "-1" ]]; then
+  bad trap.max_gas_finite "block.max_gas is a positive finite ceiling" "max_gas is -1 (unlimited) — TW-004 is NOT addressed in this genesis"
+else
+  bad trap.max_gas_finite "block.max_gas is a positive finite ceiling" "max_gas is '$MAXGAS' — it must be a positive integer"
+fi
+
+# The economic-address trap. A payout, settlement or treasury address that is a
+# module account (or the all-zero address) passes `twilightd validate` and then
+# PANICS the chain at InitChain: the keepers apply internal/economicaddress there,
+# and no ValidateGenesis does. Reproduced for all three fields.
+#
+# Module addresses are derived the standard Cosmos way — authtypes.NewModuleAddress
+# (name) is the first 20 bytes of sha256(name) — and bech32-encoded by the
+# binary's own `debug addr`, so the prefix is the chain's rather than this
+# script's. Addresses are compared lower-cased, because bech32 is
+# case-insensitive and an upper-case spelling of a module account is the same
+# account.
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -c1-64
+  else return 1; fi
+}
+bech32_of_hex() { # prints the account bech32 for 20-byte hex, or nothing
+  "$BIN" debug addr "$1" --home "$CLIHOME" 2>/dev/null | sed -n 's/^Bech32 Acc: //p'
+}
+if [[ -n "$BIN" ]]; then
+  FORBIDDEN=""; FORBIDDEN_ERR=""
+  for name in "${MODULE_ACCOUNT_NAMES[@]}" "(zero address)"; do
+    if [[ "$name" == "(zero address)" ]]; then hex="0000000000000000000000000000000000000000"
+    else hex="$(printf '%s' "$name" | sha256_hex | cut -c1-40)" || hex=""; fi
+    b32=""
+    if [[ "$hex" =~ ^[0-9a-f]{40}$ ]]; then b32="$(bech32_of_hex "$hex" || true)"; fi
+    if [[ "$b32" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then
+      FORBIDDEN="${FORBIDDEN}${b32} ${name}"$'\n'
+    else
+      FORBIDDEN_ERR="${FORBIDDEN_ERR} ${name}"
+    fi
+  done
+
+  forbidden_name() { # prints the module name when $1 is a forbidden destination
+    local line
+    while IFS= read -r line; do
+      if [[ -n "$line" && "${line%% *}" == "$1" ]]; then printf '%s' "${line#* }"; return 0; fi
+    done <<<"$FORBIDDEN"
+    return 0
+  }
+  economic_check() { # economic_check <id> <label> <jq producing one address per line>
+    local addrs a n hits=""
+    if [[ -n "$FORBIDDEN_ERR" ]]; then
+      bad "$1" "$2" "could not derive the address of:$FORBIDDEN_ERR"
+      return 0
+    fi
+    if ! addrs="$(jq -r "$3" "$GENESIS" 2>/dev/null)"; then
+      bad "$1" "$2" "the addresses could not be read"
+      return 0
+    fi
+    while IFS= read -r a; do
+      if [[ -z "$a" ]]; then continue; fi
+      n="$(forbidden_name "$a")"
+      if [[ -n "$n" ]]; then hits="${hits} ${a} (${n})"; fi
+    done <<<"$addrs"
+    if [[ -z "$hits" ]]; then ok "$1" "$2"
+    else bad "$1" "$2" "refused at InitChain:${hits}"; fi
+    return 0
+  }
+  economic_check trap.payout_not_module_account \
+    "no slot payout address is a module account or the zero address" \
+    '.app_state.coreslot.slots[]? | .payout_address | ascii_downcase'
+  economic_check trap.settlement_not_module_account \
+    "no slot settlement address is a module account or the zero address" \
+    '.app_state.coreslot.slots[]? | .settlement_address | ascii_downcase'
+  # All three copies. The mirror checks hold them equal, but this must not depend
+  # on another check having passed.
+  economic_check trap.treasury_not_module_account \
+    "treasury address is not a module account or the zero address" \
+    '[.app_state.rewards.params.treasury_address,
+      .app_state.rewards.reward_config_versions[]?.treasury_address,
+      .app_state.rewards.current_epoch_config.treasury_address]
+     | .[] | select(. != null and . != "") | ascii_downcase'
+else
+  note "module-account checks skipped: they need --bin to derive the addresses."
 fi
 
 # ---- 6. launch decisions -----------------------------------------------------------------------
@@ -438,6 +760,11 @@ eq decision.target_block_time "target_block_time_seconds"   "$GC_BLOCK_TIME_SECO
 
 AUTH="$(j '.app_state.coreslot.params.authority')"
 EAUTH="$(j '.app_state.coreslot.params.emergency_authority')"
+# Checked against the stated decision first. Shape and distinctness below are
+# properties any pair of addresses can have; only this says they are the RIGHT
+# pair.
+eq decision.authority "authority"                   "$GC_AUTHORITY"                   "$AUTH"
+eq decision.emergency_authority "emergency_authority" "$GC_EMERGENCY_AUTHORITY"     "$EAUTH"
 if [[ "$AUTH" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then ok decision.authority_shape "authority has a well-formed address"
 else bad decision.authority_shape "authority has a well-formed address" "found '$AUTH'"; fi
 if [[ "$EAUTH" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then ok decision.emergency_authority_shape "emergency_authority has a well-formed address"
