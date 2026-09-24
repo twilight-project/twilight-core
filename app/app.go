@@ -358,10 +358,10 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 // serve Swagger). When the API server is disabled this method is never called, and
 // when swagger=false the Swagger registration is a no-op, so REST is unaffected.
 //
-// It also publishes the build identity gauge (see telemetry.go): the API server
-// is where /metrics is served and telemetry is initialized before it starts, so
-// this is the earliest point at which the gauge is scrapeable — before the
-// node's first commit refreshes it.
+// It also publishes the build identity gauge (see telemetry.go). Telemetry is
+// initialized before the API server starts, so the gauge is present from the
+// moment the server is up, whether or not this node commits a block before
+// the first scrape; every commit refreshes it after that.
 func (a *App) RegisterAPIRoutes(apiSvr *serverapi.Server, apiConfig serverconfig.APIConfig) {
 	a.App.RegisterAPIRoutes(apiSvr, apiConfig)
 	if apiConfig.Swagger {

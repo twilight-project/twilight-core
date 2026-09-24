@@ -11,6 +11,7 @@ import (
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/telemetry"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/version"
 
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
@@ -28,23 +29,31 @@ import (
 // Every gauge below is set from Commit, after BaseApp.Commit has returned. At
 // that point the block's state is persisted, its app hash was already produced by
 // FinalizeBlock, and no cache context of any module is open. Nothing that runs
-// here can reach a store write, an event, or a ValidatorUpdate — not because it
-// is careful not to, but because there is nothing left in the block to reach.
-// That is the whole safety argument, and it is why the gauges are NOT set at the
-// end of each module's EndBlock: a metrics call inside the block path would have
-// to be proven harmless; one after Commit has nothing to be harmless to.
+// here can reach an event or a ValidatorUpdate, because the block that could
+// carry them is over.
 //
-// The values are read from committed state through each module's own
-// TelemetrySnapshot, which is a pure read. The keepers set no gauges and never
-// call this; the dependency runs one way, from the app to the modules.
+// The store is a different matter, and "after Commit" is not what protects it.
+// The root multistore is live: a write made through a context over it after
+// Commit(H) lands in FinalizeBlock(H+1)'s app hash, on the nodes that have
+// telemetry enabled and on no others. So the snapshots are read through a CACHE
+// of the committed multistore that is never written back. A write attempted
+// through it — by a future edit to a snapshot, or by an accessor that grows a
+// side effect — is buffered in the cache and discarded with it. The tracer test
+// in telemetry_test.go pins that no write or delete reaches the root store while
+// the exporter runs, across the pause states that change which reads happen.
+//
+// The values are read through each module's own TelemetrySnapshot, which is a
+// pure read. The keepers set no gauges and never call this; the dependency runs
+// one way, from the app to the modules.
 //
 // # What this can never do
 //
 // It returns nothing. A read that fails skips that module's gauges and counts the
-// failure; a panic is recovered and logged. When telemetry is disabled in
-// app.toml the function returns before the first read, so the disabled path is
-// exactly the pre-telemetry app. The disabled-versus-enabled app-hash equality
-// test in telemetry_test.go pins that.
+// failure; a panic is recovered and logged, and the counter the recovery bumps is
+// itself guarded, so a sink that panics cannot escape through its own failure
+// report. When telemetry is disabled in app.toml the function returns before the
+// first read, so the disabled path is exactly the pre-telemetry app. The
+// disabled-versus-enabled app-hash equality test pins that.
 //
 // # Precision
 //
@@ -52,7 +61,9 @@ import (
 // and rounded to about seven significant digits above it, which is fine for
 // trend and stall alerts and useless for equalities — so the one equality that
 // matters, escrow == liability + carry, is exported as an exactly computed
-// difference rather than as three terms to subtract.
+// difference rather than as three terms to subtract. The same bound applies to
+// heights and the settlement clock, which reach 2^24 after about 2.7 years of
+// five-second blocks.
 
 const (
 	// telemetryNamespace prefixes every module gauge: twilight_<module>_<name>.
@@ -90,16 +101,22 @@ func (a *App) emitTelemetry() {
 	defer func() {
 		if r := recover(); r != nil {
 			a.Logger().Error("telemetry export panicked; the gauges for this height were skipped", "panic", r)
-			countTelemetryReadFailure("app")
+			a.countTelemetryReadFailure("app")
 		}
 	}()
 
 	emitBuildInfo()
 
-	// A read-only context over the committed multistore at the committed height.
-	// It is not a block context: no cache, no gas accounting that matters, no
-	// event manager anything will read.
-	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: a.LastBlockHeight()})
+	// A context over a cache of the committed multistore, at the committed
+	// height. Reads fall through to the committed stores; a write would stop in
+	// the cache, which nothing ever writes back. It is not a block context: no
+	// module cache, no event manager anything will read.
+	ctx := sdk.NewContext(
+		a.CommitMultiStore().CacheMultiStore(),
+		cmtproto.Header{Height: a.LastBlockHeight()},
+		false,
+		a.Logger(),
+	)
 
 	if snap, err := a.CoreSlotKeeper.TelemetrySnapshot(ctx); err != nil {
 		a.reportTelemetryReadFailure(coreslottypes.ModuleName, err)
@@ -121,14 +138,27 @@ func (a *App) emitTelemetry() {
 func (a *App) reportTelemetryReadFailure(module string, err error) {
 	a.Logger().Error("telemetry snapshot could not be read; the module's gauges were skipped",
 		"module", module, "err", err)
-	countTelemetryReadFailure(module)
+	a.countTelemetryReadFailure(module)
 }
 
 // countTelemetryReadFailure increments twilight_telemetry_read_failures_total
-// for the module. A gauge that silently stops updating looks, for one retention
-// window, exactly like a healthy one; the counter is what makes a failed read
-// visible.
-func countTelemetryReadFailure(module string) {
+// for the module.
+//
+// It is the failure report of the panic recovery above, so it must not be able
+// to panic out of it: if the sink itself is what failed, the second panic would
+// escape emitTelemetry through the recovery's own counter call. It is guarded
+// separately for that reason.
+//
+// The Prometheus sink expires a counter that is not incremented within the
+// retention window and recreates it at 1 on the next failure, so a rate over it
+// misses one-off failures. The documented alert is max_over_time, not increase;
+// every increment is also logged at error level, which does not expire.
+func (a *App) countTelemetryReadFailure(module string) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.Logger().Error("telemetry read-failure counter panicked", "module", module, "panic", r)
+		}
+	}()
 	telemetry.IncrCounterWithLabels(
 		[]string{telemetryNamespace, "telemetry", "read_failures_total"},
 		1,

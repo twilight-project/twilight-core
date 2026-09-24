@@ -9,23 +9,21 @@ validator-set state as Prometheus gauges through the Cosmos SDK telemetry facili
 the same signals remain available through queries and the node RPC for one-off
 inspection.
 
-## Metrics endpoint
+## Enabling the exporter
 
-Metrics are served at `/metrics` on the **API server**, in Prometheus exposition
-format when requested with `?format=prometheus`. Enable both in `app.toml`:
+Two settings, in two files. The SDK telemetry facility produces the series; CometBFT's
+existing instrumentation endpoint serves them. **Validators need no API server.**
+
+In `app.toml`:
 
 ```toml
-[api]
-enable = true
-address = "tcp://0.0.0.0:1317"
-
 [telemetry]
 enabled = true
-# Seconds a series is retained without being refreshed. Must be > 0 for the
-# Prometheus endpoint to exist. Every gauge below is refreshed once per commit,
-# so keep this comfortably above the block interval.
+# Seconds a series is retained without being refreshed. The Prometheus sink is only
+# created when this is > 0. Every gauge below is refreshed once per commit, so keep
+# this comfortably above the block interval.
 prometheus-retention-time = 60
-# Keep both false: a hostname prefix changes every metric NAME below to
+# Keep both false: a hostname prefix changes the NAME of every gauge below to
 # <host>_twilight_..., which breaks every rule written against them. Use
 # enable-hostname-label = true if you want the host as a label instead.
 enable-hostname = false
@@ -36,36 +34,56 @@ service-name = ""
 global-labels = [["chain_id", "twilight-testnet-1"]]
 ```
 
-A Prometheus scrape job then looks like:
+In `config.toml`, on a **private** interface:
+
+```toml
+[instrumentation]
+prometheus = true
+prometheus_listen_addr = "10.0.0.5:26660"
+```
+
+The SDK sink registers in the process-global Prometheus registry, and CometBFT's
+`prometheus_listen_addr` endpoint serves that whole registry. So the one endpoint
+carries CometBFT's consensus metrics (block height, rounds, peers, mempool) **and**
+every `twilight_*` series below, with no extra listener:
 
 ```yaml
 - job_name: twilightd
-  metrics_path: /metrics
-  params:
-    format: [prometheus]
   static_configs:
-    - targets: ["node-1:1317", "node-2:1317"]
+    - targets: ["10.0.0.5:26660"]
 ```
 
-The API server also serves the REST endpoints; if it is exposed beyond the
-monitoring network, put it behind the same access controls as the RPC. CometBFT's
-own consensus metrics (block height, rounds, peers, mempool) are a separate endpoint
-configured in `config.toml` under `[instrumentation]` and are not repeated here.
+**Never bind either endpoint to `0.0.0.0`.** `twilightd_build_info` carries the
+version and commit, and the instrumentation endpoint also exposes peer and mempool
+detail; both belong on the monitoring network only.
+
+Full nodes that already run the API server have a second option: with the same
+`[telemetry]` block, the API server serves the series at
+`/metrics?format=prometheus` on `[api] address`. That address defaults to
+`localhost` — leave it there or on a private interface, and treat it like the RPC,
+since it is also the REST surface. Without `format=prometheus` the endpoint returns
+the SDK's own text format, and with `prometheus-retention-time = 0` it returns 400.
 
 ### Where the gauges come from
 
-Every `twilight_*` gauge is set **after `Commit`**, from committed state, by a
-read-only path that returns nothing into the block. It cannot write state, emit an
-event, or produce a validator update, and a node with telemetry disabled runs
-byte-for-byte the same state machine — a test commits a multi-epoch chain both ways
-and compares every app hash. A gauge that cannot be read is skipped for that block
-and counted in `twilight_telemetry_read_failures_total`.
+Every `twilight_*` gauge is set **after `Commit`**, from committed state, by a path
+that returns nothing into the block. It cannot emit an event or a validator update,
+because the block that could carry them is over. It cannot write state because it
+reads through a **cache of the committed multistore that is never written back**: a
+write attempted through it stops in the cache and is discarded with it. Two tests
+pin this: one commits a multi-epoch chain with telemetry disabled and enabled and
+compares every app hash; one traces every store operation at the root multistore
+while the exporter runs — in the normal, pause-pending and paused states — and
+requires that none is a write or delete. A gauge that cannot be read is skipped for
+that block and counted in `twilight_telemetry_read_failures_total`.
 
-Values are carried as `float32` by the SDK telemetry API. Amounts in `utwlt` are exact
-below 2^24 and rounded to about seven significant digits above it. That is fine for
-trends, stalls, and thresholds; it is not fine for equalities, which is why the one
+Values are carried as `float32` by the SDK telemetry API: exact below 2^24, rounded
+to about seven significant digits above it. For amounts in `utwlt` that is fine for
+trends, stalls, and thresholds, and not fine for equalities, which is why the one
 equality that matters is exported as an exactly computed difference
-(`twilight_rewards_escrow_solvency_delta_utwlt`).
+(`twilight_rewards_escrow_solvency_delta_utwlt`). The same bound applies to heights
+and the settlement clock, which pass 2^24 ≈ 16.8 million after roughly 2.7 years of
+five-second blocks; from then on those gauges step in multiples of 2.
 
 ## Metrics reference
 
@@ -89,7 +107,7 @@ count(count by (version) (twilightd_build_info)) > 1
 | `twilight_rewards_current_epoch_start_height` | height | First block of the open epoch | |
 | `twilight_rewards_current_epoch_end_height` | height | Canonical last block of the open epoch | `end = start + epoch_length − 1` |
 | `twilight_rewards_epoch_blocks_remaining` | blocks | Blocks until the open epoch's last block, from the committed height; `0` on the closing block | decreases by 1 per block |
-| `twilight_rewards_open_reward_enabled_blocks` | blocks | Reward-enabled blocks credited to the open epoch so far | increases by 1 per block while `paused = 0`; resets to 0 when an epoch opens |
+| `twilight_rewards_open_reward_enabled_blocks` | blocks | Reward-enabled blocks credited to the open epoch so far | increases by 1 per block while `paused = 0`; reads `1` on the first block of a new epoch (the counter resets as the epoch opens, then that block is credited) |
 | `twilight_rewards_last_finalized_epoch` | epoch | Greatest finalized epoch; `0` before the first finalization | equals `current_epoch − 1` except on the closing block, where it equals `current_epoch` |
 | `twilight_rewards_cumulative_emitted_utwlt` | utwlt | Total minted emission across all finalized epochs | monotonic non-decreasing; `≤ max_supply` |
 | `twilight_rewards_max_supply_utwlt` | utwlt | The immutable supply cap | constant |
@@ -137,7 +155,7 @@ counter is a consensus-state change and is tracked separately.
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `twilight_telemetry_read_failures_total` | `module` | Counter of commits at which the module's snapshot could not be read and its gauges were skipped. Any increase is a node-local fault worth a look; the chain itself halts on the same corruption one block later. |
+| `twilight_telemetry_read_failures_total` | `module` | Counter of commits at which the module's snapshot could not be read and its gauges were skipped. Any value is a node-local fault worth a look; the chain itself halts on the same corruption one block later. **The sink expires this counter** like every other series: one that is not incremented within `prometheus-retention-time` disappears and restarts at `1` on the next failure, so `increase()`/`rate()` miss one-off failures — alert on `max_over_time`, and note every increment is also logged at error level. |
 
 ## Alerts worth having
 
@@ -147,16 +165,16 @@ testnet's 360-block epochs; scale to your epoch length.
 | Condition | Expression | Why |
 |---|---|---|
 | Accrual stalled | `increase(twilight_rewards_open_reward_enabled_blocks[10m]) == 0 and twilight_rewards_paused == 0 and increase(twilight_rewards_current_epoch[10m]) == 0` | Blocks are committing but no reward-enabled block is being credited |
-| Epoch not finalizing | `time() - timestamp(changes(twilight_rewards_last_finalized_epoch[1h]) > 0)` exceeds one epoch's wall-clock length | The finalization boundary passed without a finalized epoch |
+| Epoch not finalizing | `changes(twilight_rewards_last_finalized_epoch[1h]) == 0` (window ≈ 2× the epoch's wall-clock length: 360 blocks × 5 s = 30 min) | A finalization boundary passed without a finalized epoch |
 | Materialization behind | `twilight_rewards_last_finalized_epoch - twilight_mining_last_processed_reward_epoch > 0` for more than one block | A finalized epoch has no settlement set |
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
-| Exporter fault | `increase(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node |
+| Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 
-`absent(twilightd_build_info)` on a node whose API server is up means it has not
-committed within the retention window, which is itself a liveness signal.
+`absent(twilightd_build_info)` on a node whose metrics endpoint is up means it has
+not committed within the retention window, which is itself a liveness signal.
 
 ## Signals via queries
 
