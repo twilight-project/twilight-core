@@ -47,9 +47,10 @@
 # faults suite testing a stale shape is the same silent-green problem one level
 # up.
 #
-# No chain is run. The two --initchain cases start the binary against a
-# throwaway home just long enough for the ABCI handshake (about a second each,
-# loopback only, ephemeral ports), and it never produces a block. This needs only
+# No chain is run. The InitChain cases (the baseline, the dry-run section, and
+# the probe-lifetime cases) start the binary against a throwaway home just long
+# enough for the ABCI handshake (about a second each, loopback only, ephemeral
+# ports), and it never produces a block. This needs only
 # the binary, jq, and a temp directory.
 #
 set -euo pipefail
@@ -127,7 +128,13 @@ AUTH_ADDR="$(addr auth)"; EAUTH_ADDR="$(addr eauth)"; OP1_ADDR="$(addr op1)"
 REWARDS_MODULE_ADDR=twilight1245yut9zht8q4hz39sd0lzqtzkuw5us5pd3c3u
 FEE_COLLECTOR_ADDR=twilight17xpfvakm2amg962yls6f84z3kell8c5ltxtf5t
 AUTHORITY_MODULE_ADDR=twilight17te68tpa0etfn4cmlqryw06uqh5qc2tp2fracm
+# All-zero addresses at three lengths: 20 bytes (the usual account length), 32
+# and 1. The chain refuses every one of them ("address is all zero"); an earlier
+# checker compared against the 20-byte spelling only. Encoded once with
+# `twilightd debug addr` from 40, 64 and 2 hex zeros.
 ZERO_ADDR=twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgugkct
+ZERO_ADDR_32=twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg86095
+ZERO_ADDR_1=twilight1qqkdakzw
 
 # The checker's required inputs, each with the value the baseline satisfies. The
 # abort tests below iterate this list, so a new required input that is added
@@ -155,9 +162,14 @@ required_env() {
   done
 }
 
-# Extra checker flags for the case being run (only ever --initchain). A plain
-# string so an empty value expands to nothing under bash 3.2's `set -u`, where
-# an empty array does not.
+# Extra checker flags for the case being run. A plain string so an empty value
+# expands to nothing under bash 3.2's `set -u`, where an empty array does not.
+#
+# The InitChain dry-run is the checker's DEFAULT, and the baseline below runs
+# with it. The bulk of the mutants then run with --no-initchain: each is
+# aimed at a static check, which must catch it on its own, and starting a node
+# for every one would double the suite's runtime for no added proof. The
+# dry-run's own section re-enables it.
 CHECKER_FLAGS=""
 
 # Every label the checker has ever printed, across the baseline and every mutant.
@@ -188,21 +200,38 @@ run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WO
 
 echo
 echo "==> baseline must PASS (nothing below means anything otherwise)"
-if run_checker "$GOOD"; then
-  pass "a complete genesis passes"
+if run_checker "$GOOD" && sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+  pass "a complete genesis passes, InitChain dry-run included (the default)"
 else
   printf '\033[31mBASELINE FAILED — the suite cannot run\033[0m\n'
   tail -25 "$WORK/out"
   exit 2
 fi
+CHECKER_FLAGS="--no-initchain"
 
 # ---- each check gets a fault that must make IT fire --------------------------------------
 #
 # mutate <label> <jq-mutation> <check-name-that-must-fail> [extra env...]
 mutate() {
   local label="$1" expr="$2" want="$3"; shift 3
+  jq "$expr" "$GOOD" >"$WORK/mutant.json" 2>/dev/null || { fail "$label" "the mutation itself could not be applied"; return; }
+  check_mutant "$label" "$want" "$@"
+}
+
+# mutate_raw <label> <awk-program> <check-name-that-must-fail> [extra env...]
+#
+# For faults jq cannot express, because jq's own parser erases them: a duplicate
+# key. The awk program rewrites the pretty-printed baseline text.
+mutate_raw() {
+  local label="$1" prog="$2" want="$3"; shift 3
+  awk "$prog" "$GOOD" >"$WORK/mutant.json" 2>/dev/null || { fail "$label" "the mutation itself could not be applied"; return; }
+  check_mutant "$label" "$want" "$@"
+}
+
+# check_mutant <label> <check-name-that-must-fail> [extra env...] — judges $WORK/mutant.json
+check_mutant() {
+  local label="$1" want="$2"; shift 2
   local g="$WORK/mutant.json" rc=0
-  jq "$expr" "$GOOD" >"$g" 2>/dev/null || { fail "$label" "the mutation itself could not be applied"; return; }
   if cmp -s "$g" "$GOOD"; then
     fail "$label" "the mutation changed nothing — it would pass for the wrong reason"
     return
@@ -246,8 +275,9 @@ mutate "a mixed-case display denom (Twlt) is caught" \
   '.app_state.bank.supply=[{denom:"Twlt",amount:"1"}]' trap.bank_denoms_native
 mutate "an upper-cased base denom (uTWLT) is caught" \
   '.app_state.bank.supply=[{denom:"uTWLT",amount:"1"}]' trap.bank_denoms_native
-# One over the cap, stated and in the balances, so the comparison is exact at a
-# magnitude where a double is not.
+# One over the cap, stated and in the balances. (21000000000001 is below 2^53, so
+# a double would get this one right too; the two cases after it are the ones a
+# double or a dropped carry gets wrong.)
 mutate "a starting supply one above max_supply is caught" \
   ".app_state.bank.balances=[{address:\"$OP1_ADDR\",coins:[{denom:\"utwlt\",amount:\"21000000000001\"}]}]
    | .app_state.bank.supply=[{denom:\"utwlt\",amount:\"21000000000001\"}]" \
@@ -265,6 +295,37 @@ mutate "an upper-cased module account as a payout address is caught" \
 mutate "the zero address as a slot payout address is caught" \
   ".app_state.coreslot.slots[0].payout_address=\"$ZERO_ADDR\"" \
   trap.payout_not_module_account
+mutate "a 32-byte all-zero payout address is caught" \
+  ".app_state.coreslot.slots[0].payout_address=\"$ZERO_ADDR_32\"" \
+  trap.payout_not_module_account
+mutate "a 1-byte all-zero settlement address is caught" \
+  ".app_state.coreslot.slots[0].settlement_address=\"$ZERO_ADDR_1\"" \
+  trap.settlement_not_module_account
+# Where exact arithmetic is the only thing that gets the answer right. Balances
+# of 2^63, 2^63 and 1 sum to 2^64 + 1, over a max_supply of 2^64 — but as
+# doubles 2^64 + 1 IS 2^64, so a floating-point sum (jq's `tonumber | add`)
+# passes it. No stated supply, so only the balance sum can catch it.
+mutate "balances one over a 2^64 cap are caught (a double sum would pass them)" \
+  ".app_state.bank.balances=[
+     {address:\"$OP1_ADDR\",coins:[{denom:\"utwlt\",amount:\"9223372036854775808\"}]},
+     {address:\"$AUTH_ADDR\",coins:[{denom:\"utwlt\",amount:\"9223372036854775808\"}]},
+     {address:\"$EAUTH_ADDR\",coins:[{denom:\"utwlt\",amount:\"1\"}]}]
+   | .app_state.bank.supply=[]
+   | .app_state.rewards.params.max_supply=\"18446744073709551616\"" \
+  trap.supply_within_max GC_MAX_SUPPLY=18446744073709551616
+# 20999999999999999 + 1 carries out of the low 15-digit limb. An adder that drops
+# the carry gets 20000000000000000, under the cap.
+mutate "a sum that carries across a limb is caught (a dropped carry would pass it)" \
+  ".app_state.bank.balances=[
+     {address:\"$OP1_ADDR\",coins:[{denom:\"utwlt\",amount:\"20999999999999999\"}]},
+     {address:\"$AUTH_ADDR\",coins:[{denom:\"utwlt\",amount:\"1\"}]}]
+   | .app_state.bank.supply=[]
+   | .app_state.rewards.params.max_supply=\"20999999999999999\"" \
+  trap.supply_within_max GC_MAX_SUPPLY=20999999999999999
+mutate "denom metadata whose base is the display denom is caught" \
+  '.app_state.bank.denom_metadata=[{base:"twlt",display:"utwlt",
+     denom_units:[{denom:"twlt",exponent:0},{denom:"utwlt",exponent:6}]}]' \
+  trap.denom_metadata_base
 mutate "a module account as a slot settlement address is caught" \
   ".app_state.coreslot.slots[0].settlement_address=\"$REWARDS_MODULE_ADDR\"" \
   trap.settlement_not_module_account
@@ -497,7 +558,60 @@ mutate "an emergency authority other than the one decided" \
 # the chain now starts at 5, which panics at InitChain. The binary's
 # coreslot-genesis validate reads the document's initial_height and refuses it.
 mutate "an initial_height the slots were not activated at" \
-  '.initial_height="5"' native.coreslot_genesis
+  '.initial_height=5' native.coreslot_genesis
+mutate "the emergency key allowed below min_active_slots, undecided" \
+  '.app_state.coreslot.params.allow_emergency_below_min_active=true' \
+  decision.allow_emergency_below_min
+
+# ---- document shape: the chain must read what the checker reads -------------------------------
+#
+# The six genesis files the #198 review built, each keeping every agreed
+# snake_case value in place for jq while a node started on it ran the attacker's
+# (reproduced end to end, and each passed the checker with 0 failed before
+# section 0 existed). Plus the cases each shape rule needs on its own.
+echo
+echo "==> document shape (the chain must read what the checker reads)"
+ATT="$OP1_ADDR"
+mutate "B1: a camelCase emergencyAuthority beside the agreed snake_case one" \
+  ".app_state.coreslot.params.emergencyAuthority=\"$ATT\"" shape.lowercase_ascii_keys
+mutate "B1: a camelCase pendingAuthorityTransfers nomination beside an empty snake_case list" \
+  ".app_state.coreslot.pendingAuthorityTransfers=[{role:\"AUTHORITY_ROLE_PRIMARY\",
+     transfer:{nominee:\"$ATT\",nominated_height:\"1\"}}]" shape.lowercase_ascii_keys
+mutate "B1: a camelCase treasury address and share in all three copies" \
+  ".app_state.rewards.params.treasuryAddress=\"$ATT\" | .app_state.rewards.params.emissionTreasuryShareBps=\"5000\"
+   | .app_state.rewards.reward_config_versions[0].treasuryAddress=\"$ATT\"
+   | .app_state.rewards.reward_config_versions[0].emissionTreasuryShareBps=\"5000\"
+   | .app_state.rewards.current_epoch_config.treasuryAddress=\"$ATT\"
+   | .app_state.rewards.current_epoch_config.emissionTreasuryShareBps=\"5000\"" \
+  shape.lowercase_ascii_keys
+mutate "B1: a second top-level App_State with new authorities and a premine" \
+  ". + {\"App_State\": (.app_state | .coreslot.params.authority=\"$ATT\" | .coreslot.params.emergency_authority=\"$ATT\"
+     | .bank.balances=[{address:\"$ATT\",coins:[{denom:\"utwlt\",amount:\"20000000000000\"}]}]
+     | .bank.supply=[{denom:\"utwlt\",amount:\"20000000000000\"}])}" shape.case_distinct_keys
+mutate "B1: a second top-level CONSENSUS with unlimited gas" \
+  '. + {"CONSENSUS": (.consensus | .params.block.max_gas="-1")}' shape.top_level_keys
+mutate "B1: a string initial_height plus a CometBFT consensus_params with unlimited gas" \
+  '.initial_height="1" | .consensus_params=(.consensus.params | .block.max_gas="-1")' shape.sdk_form
+mutate "a string initial_height on its own (the SDK would fall back to the CometBFT form)" \
+  '.initial_height="1"' shape.initial_height_number
+mutate "a JSON-RPC /genesis response instead of a genesis document" \
+  '{jsonrpc:"2.0",id:-1,result:{genesis:.}}' shape.sdk_form
+mutate "an unknown top-level key" \
+  '. + {genesis_note:"hello"}' shape.top_level_keys
+# U+017F (long s) folds to "s" in Go's decoder: "app_ſtate" is read AS app_state,
+# and as the later key it wins. Verified against encoding/json directly.
+mutate "a key that only Unicode case folding maps onto app_state" \
+  '. + {"app_\u017ftate": (.app_state | .coreslot.params.authority="'"$ATT"'")}' \
+  shape.lowercase_ascii_keys
+# Exact duplicates are erased by every parser that reads them, jq included, so
+# these are written into the text. The attacker's copy goes FIRST so jq, which
+# keeps the last, still sees the agreed value — only the duplicate rule can fire.
+mutate_raw "an exact duplicate chain_id key" \
+  '!done && /^  "chain_id": / { print "  \"chain_id\": \"twilight-other-1\","; done=1 } { print }' \
+  shape.unique_keys
+mutate_raw "an exact duplicate authority key inside coreslot params" \
+  '!done && /^ *"authority": / { l=$0; sub(/"authority": ".*"/, "\"authority\": \"'"$ATT"'\"", l); print l; done=1 } { print }' \
+  shape.unique_keys
 
 # ---- the InitChain dry-run -------------------------------------------------------------------
 #
@@ -507,8 +621,8 @@ mutate "an initial_height the slots were not activated at" \
 # CHAIN refuses it, which is also what makes the hard-coded module address above
 # a checked value rather than an assumed one.
 echo
-echo "==> InitChain dry-run (--initchain)"
-CHECKER_FLAGS="--initchain"
+echo "==> InitChain dry-run (on by default)"
+CHECKER_FLAGS=""
 if run_checker "$GOOD"; then
   if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
     pass "the baseline genesis completes InitChain"
@@ -527,7 +641,7 @@ else
   fail "  and the chain names the same module account the checker does" \
     "the InitChain refusal did not name $REWARDS_MODULE_ADDR as a module account"
 fi
-CHECKER_FLAGS=""
+CHECKER_FLAGS="--no-initchain"
 
 rc=0
 required_env ""
@@ -536,6 +650,84 @@ if (( rc == 2 )) && grep -q -- "--initchain needs --bin" "$WORK/out"; then
   pass "--initchain without --bin is a usage error"
 else
   fail "--initchain without --bin is a usage error" "exit $rc: $(head -2 "$WORK/out")"
+fi
+
+# ---- the probe cannot outlive the checker -------------------------------------------------
+#
+# The dry-run starts a real process, so the checker owns its lifetime. Two ways it
+# used not to: a probe that ignored SIGTERM blocked the checker's `wait` past its
+# own 120s cap, and a checker killed with SIGKILL — which no trap can see — left
+# the probe running forever with its home on disk. A stub stands in for
+# `twilightd start` (everything else goes to the real binary) and ignores
+# SIGTERM, INT and HUP, so only SIGKILL can stop it.
+echo
+echo "==> the InitChain probe cannot outlive the checker"
+STUB="$WORK/stub-twilightd"
+cat >"$STUB" <<'STUBEOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "start" ]]; then
+  echo $$ >"$STUB_PIDFILE"
+  trap '' TERM INT HUP
+  if [[ "$STUB_MODE" == "handshake" ]]; then
+    echo "INF InitChain chainID=stub"
+    echo "INF Completed ABCI Handshake - stub"
+  fi
+  while :; do sleep 1; done
+fi
+exec "$STUB_REAL_BIN" "$@"
+STUBEOF
+chmod +x "$STUB"
+STUB_TMP="$WORK/stub-tmp"
+mkdir -p "$STUB_TMP"
+alive() { kill -0 "$1" 2>/dev/null; }
+leftovers() { find "$STUB_TMP" -mindepth 1 -maxdepth 1 -name 'check-genesis.*' | head -1; }
+
+rm -f "$WORK/stub.pid"
+required_env ""
+t0="$(date +%s)"; rc=0
+env "${REQ_ENV[@]}" STUB_PIDFILE="$WORK/stub.pid" STUB_MODE=handshake STUB_REAL_BIN="$BIN" TMPDIR="$STUB_TMP" \
+  "$CHECKER" "$GOOD" --bin "$STUB" >"$WORK/out" 2>&1 || rc=$?
+t1="$(date +%s)"
+probe="$(cat "$WORK/stub.pid" 2>/dev/null || true)"
+if [[ -z "$probe" ]]; then
+  fail "a probe that ignores SIGTERM is killed, not waited on" "the stub probe never started (exit $rc)"
+elif alive "$probe"; then
+  kill -KILL "$probe" 2>/dev/null || true
+  fail "a probe that ignores SIGTERM is killed, not waited on" "the probe was still running after the checker exited"
+elif (( t1 - t0 > 30 )); then
+  fail "a probe that ignores SIGTERM is killed, not waited on" "the checker took $((t1 - t0))s — it waited on the probe"
+elif ! sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+  fail "a probe that ignores SIGTERM is killed, not waited on" "the dry-run did not complete: $(tail -2 "$WORK/out")"
+elif [[ -n "$(leftovers)" ]]; then
+  fail "a probe that ignores SIGTERM is killed, not waited on" "the probe home was left behind: $(leftovers)"
+else
+  pass "a probe that ignores SIGTERM is killed, not waited on ($((t1 - t0))s)"
+fi
+
+# SIGKILL the checker while the probe is still waiting for a handshake.
+rm -f "$WORK/stub.pid"
+env "${REQ_ENV[@]}" STUB_PIDFILE="$WORK/stub.pid" STUB_MODE=hang STUB_REAL_BIN="$BIN" TMPDIR="$STUB_TMP" \
+  "$CHECKER" "$GOOD" --bin "$STUB" >"$WORK/out" 2>&1 &
+checker_pid=$!
+n=0
+while [[ ! -s "$WORK/stub.pid" ]] && (( n < 300 )); do sleep 0.2; n=$((n + 1)); done
+probe="$(cat "$WORK/stub.pid" 2>/dev/null || true)"
+kill -KILL "$checker_pid" 2>/dev/null || true
+wait "$checker_pid" 2>/dev/null || true
+if [[ -z "$probe" ]]; then
+  fail "a checker killed with SIGKILL does not orphan its probe" "the stub probe never started"
+else
+  # The watchdog polls once a second and allows the probe a five-second grace.
+  n=0
+  while { alive "$probe" || [[ -n "$(leftovers)" ]]; } && (( n < 75 )); do sleep 0.2; n=$((n + 1)); done
+  if alive "$probe"; then
+    kill -KILL "$probe" 2>/dev/null || true
+    fail "a checker killed with SIGKILL does not orphan its probe" "the probe was still running 15s later"
+  elif [[ -n "$(leftovers)" ]]; then
+    fail "a checker killed with SIGKILL does not orphan its probe" "the probe home was left behind: $(leftovers)"
+  else
+    pass "a checker killed with SIGKILL does not orphan its probe (stopped, home deleted)"
+  fi
 fi
 
 # ---- the checker must refuse to guess ------------------------------------------------------

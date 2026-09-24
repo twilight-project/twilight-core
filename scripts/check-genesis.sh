@@ -24,27 +24,43 @@
 #   GC_MAX_GAS=<ratified> GC_MIN_ACTIVE_SLOTS=2 \
 #   GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS \
 #   GC_AUTHORITY=twilight1... GC_EMERGENCY_AUTHORITY=twilight1... \
-#     scripts/check-genesis.sh path/to/genesis.json --bin build/twilightd [--initchain]
+#     scripts/check-genesis.sh path/to/genesis.json --bin build/twilightd [--no-initchain]
 #
 # --bin is required for a passing verdict. Without it the chain's own validators,
-# `coreslot-genesis validate`, and the module-account checks (which need the
-# binary to derive bech32 addresses) cannot run, and the run exits non-zero even
-# when everything it could check passed.
+# `coreslot-genesis validate`, the module-account checks (which need the binary
+# to derive bech32 addresses) and the InitChain dry-run cannot run, and the run
+# exits non-zero even when everything it could check passed.
 #
-# --initchain additionally starts the binary against a throwaway home holding
-# this genesis and waits for the ABCI handshake to complete, which is the point
-# InitChain — every module's InitGenesis — has run. The other checks predict what
-# InitGenesis will refuse; this is the only one that asks it. It costs about a
-# second on a small genesis (bounded at 120s), binds only 127.0.0.1 on ephemeral
-# ports, never proposes or signs (the probe's key is not in the validator set),
-# and deletes the home afterwards.
+# THE InitChain DRY-RUN IS ON BY DEFAULT. With --bin, the binary is started
+# against a throwaway home holding this genesis until the ABCI handshake
+# completes, which is the point InitChain — every module's InitGenesis — has run.
+# The other checks predict what InitGenesis will refuse; this is the only one
+# that asks it, and it has caught what none of them did (a committed genesis the
+# current binary cannot start at all). It costs about a second on a small
+# genesis, bounded at 120s. The probe binds only 127.0.0.1 on ephemeral ports
+# with every optional server off, never proposes or signs (its key is not in the
+# validator set), is stopped with SIGKILL if SIGTERM does not stop it, and a
+# watchdog stops it and deletes its home if this script itself is killed.
+# --no-initchain skips it; --initchain is accepted and is the default.
+#
+# THE FILE IS READ THE WAY THE CHAIN READS IT, OR REFUSED. This script reads the
+# genesis with jq, which matches keys exactly. The chain does not: the SDK
+# decodes the document with Go's encoding/json, which matches keys
+# case-insensitively (including Unicode folds such as U+017F for "s") and keeps
+# the LAST duplicate; every module's state then goes through gogoproto jsonpb,
+# which also accepts each field's camelCase name and prefers it over the
+# snake_case one; and a document the SDK cannot decode as AppGenesis is re-read
+# as the legacy CometBFT format. Each of those let a genesis show jq the agreed
+# values while the chain ran different ones (#198 review). Section 0 therefore
+# refuses any document on which the two readers could disagree, before anything
+# else is read from it.
 #
 set -euo pipefail
 
 if [[ "${1:-}" == "--list-checks" ]]; then LIST_ONLY=1; else LIST_ONLY=0; fi
 GENESIS="${1:-}"
 BIN=""
-INITCHAIN=0
+INITCHAIN=default
 shift || true
 while (( $# )); do
   case "$1" in
@@ -52,12 +68,18 @@ while (( $# )); do
       [[ $# -ge 2 ]] || { echo "--bin needs a path to the twilightd binary" >&2; exit 2; }
       BIN="$2"; shift 2 ;;
     --initchain) INITCHAIN=1; shift ;;
+    --no-initchain) INITCHAIN=0; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-(( LIST_ONLY )) || [[ -n "$GENESIS" ]] || { echo "usage: $0 <genesis.json> --bin <twilightd> [--initchain]" >&2; exit 2; }
-(( LIST_ONLY )) || (( ! INITCHAIN )) || [[ -n "$BIN" ]] || { echo "--initchain needs --bin: it starts that binary" >&2; exit 2; }
+(( LIST_ONLY )) || [[ -n "$GENESIS" ]] || { echo "usage: $0 <genesis.json> --bin <twilightd> [--no-initchain]" >&2; exit 2; }
+# Asked for explicitly, the dry-run cannot be silently skipped for want of a
+# binary. By default it simply needs one, like every other binary check.
+if [[ "$INITCHAIN" == "1" && -z "$BIN" ]] && (( ! LIST_ONLY )); then
+  echo "--initchain needs --bin: it starts that binary" >&2; exit 2
+fi
+if [[ "$INITCHAIN" == "default" ]]; then INITCHAIN=1; fi
 (( LIST_ONLY )) || [[ -f "$GENESIS" ]] || { echo "no such genesis file: $GENESIS" >&2; exit 2; }
 (( LIST_ONLY )) || command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
@@ -76,6 +98,8 @@ done
 # Adding a check without adding it here is a hard error at runtime. Adding it here
 # without a fault case fails the suite. Making one unreachable fails the suite.
 CHECK_IDS=(
+  shape.unique_keys shape.lowercase_ascii_keys shape.case_distinct_keys
+  shape.sdk_form shape.top_level_keys shape.initial_height_number
   native.validate native.coreslot_genesis native.initchain
   fresh.current_epoch fresh.cumulative_emitted fresh.carry_forward_remainder
   fresh.open_reward_blocks fresh.entitlement_liability fresh.has_pending_params
@@ -95,13 +119,15 @@ CHECK_IDS=(
   bound.chunks_per_settlement bound.min_payout bound.settlement_window
   bound.max_active_slots bound.selection_cooldown
   trap.treasury_address_for_share trap.slot_status_known trap.active_within_bounds
-  trap.native_denom trap.fee_denom trap.bank_denoms_native trap.supply_within_max
+  trap.native_denom trap.fee_denom trap.bank_denoms_native trap.denom_metadata_base
+  trap.supply_within_max
   trap.max_gas_finite
   trap.payout_not_module_account trap.settlement_not_module_account
   trap.treasury_not_module_account
   decision.chain_id decision.max_gas decision.active_slots decision.min_active_slots
   decision.epoch_length decision.max_supply decision.subsidy decision.distribution_method
   decision.emission_share decision.treasury_address decision.allow_self_registration
+  decision.allow_emergency_below_min
   decision.target_block_time decision.authority decision.emergency_authority
   decision.authority_shape decision.emergency_authority_shape decision.authorities_distinct
 )
@@ -192,6 +218,10 @@ GC_INITIAL_BLOCK_SUBSIDY="${GC_INITIAL_BLOCK_SUBSIDY:-416190}"                  
 GC_TREASURY_ADDRESS="${GC_TREASURY_ADDRESS:-}"                                           # rewards DefaultParams (empty)
 GC_EMISSION_TREASURY_SHARE_BPS="${GC_EMISSION_TREASURY_SHARE_BPS:-0}"                    # rewards DefaultParams
 GC_NATIVE_DENOM="${GC_NATIVE_DENOM:-utwlt}"                                              # appparams.NativeBaseDenom
+# allow_emergency_below_min_active lets the EMERGENCY key suspend slots below
+# min_active_slots, down to a single active validator. The shipped value is false
+# (coreslot DefaultParams); a genesis carrying true must say so on purpose.
+GC_ALLOW_EMERGENCY_BELOW_MIN="${GC_ALLOW_EMERGENCY_BELOW_MIN:-false}"                    # coreslot DefaultParams
 # Not a genesis value. Used only to project the emission schedule, because the
 # schedule depends on real block time and genesis cannot record it.
 GC_BLOCK_TIME_SECONDS="${GC_BLOCK_TIME_SECONDS:-5}"
@@ -217,6 +247,20 @@ bad() { # bad <id> <label> [detail]
   return 0
 }
 note() { printf '  \033[36mnote\033[0m  %s\n' "$1"; }
+
+# The verdict. A function because section 0 can end the run early: on a document
+# in the CometBFT form every later check would read the wrong keys, and a page of
+# failures that all mean "wrong format" hides the one message that matters.
+finish() {
+  printf '\n\033[1msummary\033[0m  %d passed, %d failed\n' "$PASS" "$FAIL"
+  if (( FAIL > 0 )); then
+    printf '\033[31mGENESIS NOT READY\033[0m — %d check(s) failed.\n' "$FAIL"
+    exit 1
+  fi
+  printf '\033[32mall checks passed\033[0m\n'
+  [[ -n "$BIN" ]] || { printf '\033[33mbut the chain'"'"'s own validator was not run — re-run with --bin\033[0m\n'; exit 1; }
+  exit 0
+}
 
 # jq read that fails closed: a missing path becomes __MISSING__ rather than an
 # empty string that would silently compare equal to an empty expectation.
@@ -315,14 +359,126 @@ truthy() { # truthy <id> <label> <jq-boolean-expression> <detail-on-fail>
 
 printf '\033[1mcheck-genesis\033[0m  %s\n' "$GENESIS"
 
+# ---- 0. the document is read the way the chain reads it --------------------------------------
+#
+# Every check below reads this file with jq, and jq's view is only worth checking
+# if it is the chain's view. It is not, in general (see the header): Go's
+# encoding/json folds key case and keeps the last duplicate, gogoproto jsonpb
+# prefers camelCase field names, and the SDK re-reads an undecodable AppGenesis
+# as the CometBFT format. Each of the following was reproduced passing every
+# other check with the agreed snake_case values in place while a node started on
+# the file ran an attacker's: a camelCase emergencyAuthority, a camelCase
+# pendingAuthorityTransfers nomination, a camelCase treasury address and share, a
+# second "App_State" carrying new authorities and a premine, a top-level
+# "CONSENSUS" with unlimited gas, and a string initial_height that sent the SDK
+# to a consensus_params block with unlimited gas.
+#
+# These checks make that class impossible rather than chasing instances of it:
+# with every key lower-case ASCII, unique, and of the SDK's own top-level shape,
+# there is exactly one reading of the document and jq and Go both make it.
+section "0. document shape (the chain must read what this script reads)"
+
+# Exact duplicates. jq keeps the last silently, so they cannot be seen after
+# parsing — but --stream emits every value as it is read, including the ones the
+# parser then discards. Every value, even an empty object or array, produces at
+# least one leaf event, so a duplicate always makes the raw count exceed the
+# count of the parsed document. Counted with jq itself rather than wc so that
+# the comparison is between two numbers jq produced.
+RAW_LEAVES="$(jq -n --stream '[inputs | select(length == 2)] | length' "$GENESIS" 2>/dev/null || echo "__ERR__")"
+PARSED_LEAVES="$(jq '[tostream | select(length == 2)] | length' "$GENESIS" 2>/dev/null || echo "__ERR__")"
+if ! is_num "$RAW_LEAVES" || ! is_num "$PARSED_LEAVES"; then
+  bad shape.unique_keys "no object repeats a key" "the document could not be parsed as JSON"
+elif (( RAW_LEAVES == PARSED_LEAVES )); then
+  ok shape.unique_keys "no object repeats a key"
+else
+  bad shape.unique_keys "no object repeats a key" \
+      "$((RAW_LEAVES - PARSED_LEAVES)) value(s) are shadowed by a later duplicate key — jq and the chain may each read a different one"
+fi
+
+# Key spelling. An upper-case letter is what every camelCase alias and every
+# case variant needs; a non-ASCII character is what Go's Unicode folding needs
+# ("app_ſtate", U+017F, decodes as app_state). Every key the chain writes is
+# lower-case ASCII, so this refuses nothing legitimate.
+# `..` includes the root object, which `paths(...)` does not.
+if ODD_KEYS="$(jq -r '[.. | objects | keys[]
+      | select(test("[A-Z]") or (explode | any(. > 127)))] | unique | map(@json) | join(" ")' "$GENESIS" 2>/dev/null)"; then
+  if [[ -z "$ODD_KEYS" ]]; then ok shape.lowercase_ascii_keys "every key is lower-case ASCII"
+  else bad shape.lowercase_ascii_keys "every key is lower-case ASCII" \
+      "found $ODD_KEYS — the chain accepts these as aliases of the snake_case keys and may PREFER them"; fi
+else
+  bad shape.lowercase_ascii_keys "every key is lower-case ASCII" "keys could not be read"
+fi
+
+# Case variants within one object. Implied by the rule above, and stated on its
+# own because it names the actual hazard: two keys the chain treats as one.
+if CASE_DUPS="$(jq -r '[.. | objects | keys
+      | group_by(ascii_downcase)[] | select(length > 1) | map(@json) | join("/")] | unique | join(" ")' "$GENESIS" 2>/dev/null)"; then
+  if [[ -z "$CASE_DUPS" ]]; then ok shape.case_distinct_keys "no two keys in one object differ only in case"
+  else bad shape.case_distinct_keys "no two keys in one object differ only in case" \
+      "found $CASE_DUPS — Go's decoder treats each group as ONE key and keeps the last"; fi
+else
+  bad shape.case_distinct_keys "no two keys in one object differ only in case" "keys could not be read"
+fi
+
+# The CometBFT form, served by the node's /genesis RPC and written by older
+# tooling. The SDK can read it, but only through a fallback this script cannot
+# follow, and a document carrying BOTH forms is read by whichever decode
+# succeeds. Refused outright, and the run stops here: every later check reads
+# SDK-form keys, and a page of failures that all mean "wrong form" would bury
+# this message.
+NOT_SDK="$(jq -r 'if type != "object" then "the document is not a JSON object"
+    elif has("consensus_params") then "it has a top-level consensus_params: this is the CometBFT form"
+    elif has("jsonrpc") or has("result") then "it is a JSON-RPC response, not a genesis document"
+    else "" end' "$GENESIS" 2>/dev/null || echo "the document could not be read")"
+if [[ -z "$NOT_SDK" ]]; then
+  ok shape.sdk_form "the document is an SDK genesis (AppGenesis), not the CometBFT or RPC form"
+else
+  bad shape.sdk_form "the document is an SDK genesis (AppGenesis), not the CometBFT or RPC form" \
+      "$NOT_SDK.
+        Rebuild it in the SDK form — top-level \"consensus\": {\"params\": ...} and a numeric
+        initial_height, as \`twilightd init\` writes — and verify that file. Stopping here:
+        every later check reads SDK-form keys."
+  finish
+fi
+
+# The SDK's top-level shape exactly (genutil AppGenesis), plus the validators key
+# `coreslot-genesis add` writes. Anything else is a key the chain ignores or, worse,
+# one that folds onto a key it reads.
+if UNKNOWN_TOP="$(jq -r 'keys - ["app_name","app_version","genesis_time","chain_id","initial_height",
+      "app_hash","app_state","consensus","validators"] | map(@json) | join(" ")' "$GENESIS" 2>/dev/null)"; then
+  if [[ -z "$UNKNOWN_TOP" ]]; then ok shape.top_level_keys "only AppGenesis top-level keys"
+  else bad shape.top_level_keys "only AppGenesis top-level keys" "unexpected: $UNKNOWN_TOP"; fi
+else
+  bad shape.top_level_keys "only AppGenesis top-level keys" "top-level keys could not be read"
+fi
+
+# initial_height as a JSON number. AppGenesis declares it int64, so a STRING makes
+# the whole AppGenesis decode fail and the SDK silently re-reads the file as the
+# CometBFT format — from different keys.
+IH_TYPE="$(jq -r '.initial_height | type' "$GENESIS" 2>/dev/null || echo "__ERR__")"
+if [[ "$IH_TYPE" == "number" ]]; then ok shape.initial_height_number "initial_height is a JSON number"
+else bad shape.initial_height_number "initial_height is a JSON number" \
+    "it is a $IH_TYPE — a non-number makes the SDK fall back to reading the CometBFT format"; fi
+
 # ---- 1. native validation ------------------------------------------------------------------
 #
 # The chain's own answer. Everything below is a cross-check that produces a better
 # message; nothing below overrides this.
 section "1. native validation (authoritative)"
-WORKDIR=""; IC_PID=""
+WORKDIR=""; IC_PID=""; IC_WATCHDOG=""
+# stop_pid <pid>: SIGTERM, a five-second grace, then SIGKILL. Never blocks past
+# that: a bare `wait` on a process that ignores SIGTERM blocked indefinitely.
+stop_pid() {
+  local pid="$1" n=0
+  kill -TERM "$pid" 2>/dev/null || return 0
+  while kill -0 "$pid" 2>/dev/null && (( n < 25 )); do sleep 0.2; n=$((n + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
 cleanup() {
-  if [[ -n "$IC_PID" ]]; then kill "$IC_PID" 2>/dev/null || true; wait "$IC_PID" 2>/dev/null || true; fi
+  if [[ -n "$IC_WATCHDOG" ]]; then kill -KILL "$IC_WATCHDOG" 2>/dev/null || true; wait "$IC_WATCHDOG" 2>/dev/null || true; fi
+  if [[ -n "$IC_PID" ]]; then stop_pid "$IC_PID"; fi
   if [[ -n "$WORKDIR" ]]; then rm -rf "$WORKDIR"; fi
   return 0
 }
@@ -336,7 +492,7 @@ if [[ -n "$BIN" ]]; then
   # pre-run writes a client.toml into whatever home it resolves, and the default
   # is the operator's real ~/.twilightd.
   CLIHOME="$WORKDIR/cli-home"
-  if "$BIN" validate "$GENESIS" >"$VLOG" 2>&1; then
+  if "$BIN" validate "$GENESIS" --home "$CLIHOME" >"$VLOG" 2>&1; then
     ok native.validate "twilightd validate"
   else
     bad native.validate "twilightd validate" "$(tail -3 "$VLOG")"
@@ -380,6 +536,25 @@ if [[ -n "$BIN" ]]; then
         --grpc.enable=false --grpc-web.enable=false --api.enable=false \
         --log_level info --log_no_color >"$ICLOG" 2>&1 &
       IC_PID=$!
+      # The EXIT trap stops the probe on every exit this script sees. It cannot
+      # see SIGKILL, which left the probe running forever with its home on disk.
+      # So a watchdog outlives this script by design: it polls for this script's
+      # PID and, once that is gone, stops the probe and deletes the home. It
+      # ignores INT and HUP so a Ctrl-C that reaches the whole process group
+      # cannot take it down before it has done that.
+      (
+        trap - EXIT; trap '' INT HUP; set +e
+        parent=$$ probe=$IC_PID
+        while kill -0 "$parent" 2>/dev/null; do
+          kill -0 "$probe" 2>/dev/null || exit 0
+          sleep 1
+        done
+        kill -TERM "$probe" 2>/dev/null
+        n=0; while kill -0 "$probe" 2>/dev/null && (( n < 25 )); do sleep 0.2; n=$((n + 1)); done
+        kill -KILL "$probe" 2>/dev/null
+        rm -rf "$WORKDIR"
+      ) </dev/null >/dev/null 2>&1 &
+      IC_WATCHDOG=$!
       IC_RESULT=timeout
       i=0
       while (( i < 600 )); do # 600 x 0.2s = 120s
@@ -388,9 +563,11 @@ if [[ -n "$BIN" ]]; then
         sleep 0.2
         i=$((i + 1))
       done
-      kill "$IC_PID" 2>/dev/null || true
-      wait "$IC_PID" 2>/dev/null || true
+      stop_pid "$IC_PID"
       IC_PID=""
+      kill -KILL "$IC_WATCHDOG" 2>/dev/null || true
+      wait "$IC_WATCHDOG" 2>/dev/null || true
+      IC_WATCHDOG=""
       # A process that exited just after logging the handshake still completed it.
       if [[ "$IC_RESULT" == "exited" ]] && grep -q "Completed ABCI Handshake" "$ICLOG"; then IC_RESULT=ok; fi
       # The handshake line alone is not proof that InitChain ran — a home with
@@ -409,11 +586,11 @@ if [[ -n "$BIN" ]]; then
       esac
     fi
   else
-    note "InitChain was not dry-run. Add --initchain to start the binary on this genesis (about a second)."
+    note "InitChain was NOT dry-run (--no-initchain). Nothing above asked InitGenesis itself."
   fi
 else
-  note "no --bin given; the chain's own validators were NOT run and the module-account"
-  note "checks cannot derive addresses. Supply --bin build/twilightd."
+  note "no --bin given; the chain's own validators and the InitChain dry-run were NOT run,"
+  note "and the module-account checks cannot derive addresses. Supply --bin build/twilightd."
 fi
 
 # ---- 2. fresh-genesis invariants ------------------------------------------------------------
@@ -606,6 +783,17 @@ else
   bad trap.bank_denoms_native "every bank supply and balance denom is exactly $GC_NATIVE_DENOM" "bank denoms could not be read"
 fi
 
+# Denom metadata is what wallets and explorers use to scale amounts. An entry whose
+# base is the display denom inverts the scale by 10^6 for anyone reading it, and
+# no validator objects. Every entry's base must be the native base denom.
+if BAD_META="$(jq -r --arg d "$GC_NATIVE_DENOM" \
+    '[.app_state.bank.denom_metadata[]? | .base | select(. != $d) | tostring] | unique | join(",")' "$GENESIS" 2>/dev/null)"; then
+  if [[ -z "$BAD_META" ]]; then ok trap.denom_metadata_base "every bank denom_metadata base is $GC_NATIVE_DENOM"
+  else bad trap.denom_metadata_base "every bank denom_metadata base is $GC_NATIVE_DENOM" "found base: $BAD_META"; fi
+else
+  bad trap.denom_metadata_base "every bank denom_metadata base is $GC_NATIVE_DENOM" "denom_metadata could not be read"
+fi
+
 # The rewards supply-cap invariant: the native supply never exceeds max_supply.
 # Emission is capped against it, but nothing at genesis is — a starting supply
 # above the cap passes every validator and breaks the invariant from block 1.
@@ -681,9 +869,8 @@ bech32_of_hex() { # prints the account bech32 for 20-byte hex, or nothing
 }
 if [[ -n "$BIN" ]]; then
   FORBIDDEN=""; FORBIDDEN_ERR=""
-  for name in "${MODULE_ACCOUNT_NAMES[@]}" "(zero address)"; do
-    if [[ "$name" == "(zero address)" ]]; then hex="0000000000000000000000000000000000000000"
-    else hex="$(printf '%s' "$name" | sha256_hex | cut -c1-40)" || hex=""; fi
+  for name in "${MODULE_ACCOUNT_NAMES[@]}"; do
+    hex="$(printf '%s' "$name" | sha256_hex | cut -c1-40)" || hex=""
     b32=""
     if [[ "$hex" =~ ^[0-9a-f]{40}$ ]]; then b32="$(bech32_of_hex "$hex" || true)"; fi
     if [[ "$b32" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then
@@ -693,10 +880,23 @@ if [[ -n "$BIN" ]]; then
     fi
   done
 
-  forbidden_name() { # prints the module name when $1 is a forbidden destination
-    local line
+  forbidden_name() { # prints why $1 is a forbidden destination, or nothing
+    local line data
+    # ALL-ZERO, AT ANY LENGTH. The chain refuses an address whose bytes are all
+    # zero, whatever its length; comparing against the one 20-byte spelling let a
+    # 32-byte or a 1-byte zero address through. This decodes rather than
+    # compares: bech32 is <hrp>1<data><6-char checksum>, the separator is the
+    # LAST "1" (the data alphabet has none), and "q" is the digit 0, so the bytes
+    # are all zero exactly when every data character is "q" — the chain's decoder
+    # refuses non-zero padding bits, so no other spelling of zero bytes is valid.
+    # An empty payload is refused the same way, as the chain does.
+    data="${1##*1}"
+    if [[ "$1" == *1* && ${#data} -ge 6 ]]; then
+      data="${data:0:${#data}-6}"
+      if [[ "$data" =~ ^q*$ ]]; then printf 'all-zero address, %d bytes' $(( ${#data} * 5 / 8 )); return 0; fi
+    fi
     while IFS= read -r line; do
-      if [[ -n "$line" && "${line%% *}" == "$1" ]]; then printf '%s' "${line#* }"; return 0; fi
+      if [[ -n "$line" && "${line%% *}" == "$1" ]]; then printf '%s module account' "${line#* }"; return 0; fi
     done <<<"$FORBIDDEN"
     return 0
   }
@@ -720,15 +920,15 @@ if [[ -n "$BIN" ]]; then
     return 0
   }
   economic_check trap.payout_not_module_account \
-    "no slot payout address is a module account or the zero address" \
+    "no slot payout address is a module account or all-zero" \
     '.app_state.coreslot.slots[]? | .payout_address | ascii_downcase'
   economic_check trap.settlement_not_module_account \
-    "no slot settlement address is a module account or the zero address" \
+    "no slot settlement address is a module account or all-zero" \
     '.app_state.coreslot.slots[]? | .settlement_address | ascii_downcase'
   # All three copies. The mirror checks hold them equal, but this must not depend
   # on another check having passed.
   economic_check trap.treasury_not_module_account \
-    "treasury address is not a module account or the zero address" \
+    "treasury address is not a module account or all-zero" \
     '[.app_state.rewards.params.treasury_address,
       .app_state.rewards.reward_config_versions[]?.treasury_address,
       .app_state.rewards.current_epoch_config.treasury_address]
@@ -750,6 +950,7 @@ eq decision.distribution_method "distribution_method"         "$GC_DISTRIBUTION_
 eq decision.emission_share "emission_treasury_share_bps" "$GC_EMISSION_TREASURY_SHARE_BPS" "$EMIS_BPS"
 eq decision.treasury_address "treasury_address"            "$GC_TREASURY_ADDRESS"            "$TREAS_ADDR"
 eq decision.allow_self_registration "allow_self_registration"     "false"                           "$(j '.app_state.coreslot.params.allow_self_registration')"
+eq decision.allow_emergency_below_min "allow_emergency_below_min_active" "$GC_ALLOW_EMERGENCY_BELOW_MIN" "$(j '.app_state.coreslot.params.allow_emergency_below_min_active')"
 # target_block_time_seconds drives NO computation — it is validated non-zero and
 # then unused — so nothing in the chain notices when it disagrees with the pacing
 # operators actually run. The node's own default is derived from the Go constant,
@@ -821,11 +1022,4 @@ fi
 note "Block time is timeout_commit in each node's config.toml. It is NOT in genesis."
 
 # ---- summary ---------------------------------------------------------------------------------
-printf '\n\033[1msummary\033[0m  %d passed, %d failed\n' "$PASS" "$FAIL"
-if (( FAIL > 0 )); then
-  printf '\033[31mGENESIS NOT READY\033[0m — %d check(s) failed.\n' "$FAIL"
-  exit 1
-fi
-printf '\033[32mall checks passed\033[0m\n'
-[[ -n "$BIN" ]] || { printf '\033[33mbut the chain'"'"'s own validator was not run — re-run with --bin\033[0m\n'; exit 1; }
-exit 0
+finish
