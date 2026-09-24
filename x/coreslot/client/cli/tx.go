@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -289,15 +290,32 @@ func metadataPatchFromFlags(fs *pflag.FlagSet, positional []string) (metadataPat
 	return patch, nil
 }
 
-// validate holds the NAMED values to the limit the keeper enforces, through the
-// keeper's own validator, so a value that would be refused on-chain is refused
-// before any node is reached. It is the local half of the check: the merged
-// record is validated again once the current one is read, because an unnamed
-// field can already be over the limit on-chain (genesis does not validate
-// metadata) and only the merge can see that.
+// validate holds the NAMED values to what the chain accepts — checkMetadata —
+// so a value that would be refused on-chain is refused before any node is
+// reached. It is the local half of the check: the merged record is validated
+// again once the current one is read, because an unnamed field can already be
+// over the limit on-chain (genesis does not validate metadata) and only the
+// merge can see that.
 func (p metadataPatch) validate() error {
-	if err := types.ValidateMetadata(p.apply(nil)); err != nil {
+	if err := checkMetadata(p.apply(nil)); err != nil {
 		return fmt.Errorf("metadata: %w", err)
+	}
+	return nil
+}
+
+// checkMetadata is the keeper's validator plus the wire's rule the keeper never
+// has to state: proto3 strings must be valid UTF-8. A transaction carrying one
+// that is not is refused at decode (CheckTx, "contains invalid UTF-8"), so the
+// keeper's validator never sees such a message and does not check for it — and
+// without this the command exited 0 and --generate-only wrote the document.
+func checkMetadata(m *types.OperatorMetadata) error {
+	if err := types.ValidateMetadata(m); err != nil {
+		return err
+	}
+	for _, f := range metadataFields {
+		if !utf8.ValidString(*f.sel(m)) {
+			return fmt.Errorf("%s contains invalid UTF-8", f.field)
+		}
 	}
 	return nil
 }
@@ -404,6 +422,10 @@ func updateMetadataCmd() *cobra.Command {
 		if clientCtx.Offline {
 			return fmt.Errorf("update-metadata reads the slot's current metadata from a node, so it cannot run with --offline")
 		}
+		from := clientCtx.GetFromAddress().String()
+		if from == "" {
+			return fmt.Errorf("--from is required: the slot's operator signs this transaction")
+		}
 		// The read goes through the same generated client every query command
 		// uses, against --node (the transaction flag set carries no gRPC
 		// endpoint), so a --generate-only run reads the same record a broadcast
@@ -419,7 +441,6 @@ func updateMetadataCmd() *cobra.Command {
 		// record in hand that is known here, and refusing now is the difference
 		// between a local error and a broadcast that fails in the block while the
 		// command exits 0.
-		from := clientCtx.GetFromAddress().String()
 		if from != resp.Slot.OperatorAddress {
 			return fmt.Errorf("slot %d is operated by %s; --from is %s, which the chain would refuse", id, resp.Slot.OperatorAddress, from)
 		}
@@ -429,7 +450,7 @@ func updateMetadataCmd() *cobra.Command {
 		// slot can carry an over-long field the keeper would refuse the moment it
 		// is written back. Naming that field replaces it; leaving it unnamed
 		// sends a record the chain rejects, which is refused here instead.
-		if err := types.ValidateMetadata(merged); err != nil {
+		if err := checkMetadata(merged); err != nil {
 			return fmt.Errorf("the record as it would be stored is invalid (%v); a field not named here already exceeds the limit on-chain, so name it to replace it", err)
 		}
 		printMetadataPreview(cmd.ErrOrStderr(), id, resp.Slot.Metadata, merged, patch)

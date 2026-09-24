@@ -210,6 +210,25 @@ func TestUpdateMetadataRefusesOverlongValueLocally(t *testing.T) {
 	require.Len(t, run.message(t).Metadata.Details, 512)
 }
 
+// Invalid UTF-8 is refused at CheckTx ("contains invalid UTF-8") — after the
+// command exited 0 and --generate-only wrote the document. The keeper's
+// validator never sees such a message, so the CLI checks the wire's rule too.
+func TestUpdateMetadataRefusesInvalidUTF8Locally(t *testing.T) {
+	run, err := runUpdateMetadata(t, fullMetadata(), "--details", "bad\xffbyte")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "details contains invalid UTF-8")
+	require.Empty(t, run.node.queried, "refused before any node was reached")
+	require.Empty(t, run.stdout.String())
+}
+
+// No --from is a plain "required" error, not an operator mismatch against "".
+func TestUpdateMetadataRequiresFrom(t *testing.T) {
+	run, err := runUpdateMetadata(t, fullMetadata(), "--website", "x", "--from", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--from is required")
+	require.Empty(t, run.node.queried)
+}
+
 // A slot registered with no metadata at all merges as all-empty, so the first
 // update-metadata against it works rather than dereferencing nil.
 func TestUpdateMetadataOnSlotWithoutMetadata(t *testing.T) {
