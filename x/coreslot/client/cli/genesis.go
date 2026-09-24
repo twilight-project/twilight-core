@@ -234,10 +234,6 @@ func validateGenesisCmd() *cobra.Command {
 			if err := types.ValidateFreshGenesisInitialHeight(&genesis, initialHeight); err != nil {
 				return err
 			}
-			var validators []genesisValidator
-			if err := json.Unmarshal(doc["validators"], &validators); err != nil {
-				return err
-			}
 			expected := map[string]string{}
 			for _, slot := range genesis.Slots {
 				if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
@@ -249,12 +245,19 @@ func validateGenesisCmd() *cobra.Command {
 				}
 				expected[base64.StdEncoding.EncodeToString(pk.Bytes())] = strconv.FormatInt(slot.ConsensusPower, 10)
 			}
-			if len(expected) != len(validators) {
-				return fmt.Errorf("CometBFT validator count %d does not match active core slots %d", len(validators), len(expected))
+			lists, err := statedValidatorLists(doc)
+			if err != nil {
+				return err
 			}
-			for _, validator := range validators {
-				if expected[validator.PubKey.Value] != validator.Power {
-					return fmt.Errorf("CometBFT validator %s does not match coreslot genesis", validator.Name)
+			for _, list := range lists {
+				if len(expected) != len(list.validators) {
+					return fmt.Errorf("%s: CometBFT validator count %d does not match active core slots %d",
+						list.key, len(list.validators), len(expected))
+				}
+				for _, validator := range list.validators {
+					if expected[validator.PubKey.Value] != validator.Power {
+						return fmt.Errorf("%s: CometBFT validator %s does not match coreslot genesis", list.key, validator.Name)
+					}
 				}
 			}
 			// Reading the height is part of validating it; writing it back is not.
@@ -266,6 +269,69 @@ func validateGenesisCmd() *cobra.Command {
 	}
 	flags.AddQueryFlagsToCmd(cmd)
 	return cmd
+}
+
+// statedValidator is one CometBFT validator list found in the document, with the
+// key it was found under so a mismatch names where to look.
+type statedValidator struct {
+	key        string
+	validators []genesisValidator
+}
+
+// statedValidatorLists returns every CometBFT validator list the document
+// actually states. Two places can carry one:
+//
+//   - consensus.validators, which is the one the chain reads. The SDK decodes
+//     the document as AppGenesis and hands CometBFT consensus.validators; when
+//     that is empty, CometBFT takes the set InitChain returns, and CoreSlot's
+//     InitGenesis returns exactly the active slots.
+//   - the top-level validators key, which `coreslot-genesis add` writes. The SDK
+//     does not read it at all, and any SDK command that rewrites the document —
+//     `add-genesis-account` run after `add` is the common one (#195) — drops it.
+//
+// So an absent, null or empty list is not a fault: it states nothing, and the
+// chain derives the set from the slots. Only a list that is present and
+// non-empty makes a claim, and every such claim is checked. A list that is
+// present but unreadable is refused, naming its key, rather than being taken for
+// absent.
+func statedValidatorLists(doc map[string]json.RawMessage) ([]statedValidator, error) {
+	var lists []statedValidator
+	add := func(key string, raw json.RawMessage) error {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || string(raw) == "null" {
+			return nil
+		}
+		var validators []genesisValidator
+		if err := json.Unmarshal(raw, &validators); err != nil {
+			return fmt.Errorf("genesis %s is present but unreadable: %w", key, err)
+		}
+		if len(validators) > 0 {
+			lists = append(lists, statedValidator{key: key, validators: validators})
+		}
+		return nil
+	}
+	if err := add("consensus.validators", consensusValidators(doc)); err != nil {
+		return nil, err
+	}
+	if err := add("validators", doc["validators"]); err != nil {
+		return nil, err
+	}
+	return lists, nil
+}
+
+// consensusValidators extracts consensus.validators, or nothing when the
+// consensus section or the key is absent. A consensus section that is present
+// but not an object is returned as-is so the caller reports it as unreadable.
+func consensusValidators(doc map[string]json.RawMessage) json.RawMessage {
+	raw := bytes.TrimSpace(doc["consensus"])
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var consensus map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &consensus); err != nil {
+		return raw
+	}
+	return consensus["validators"]
 }
 
 type genesisPubKey struct {

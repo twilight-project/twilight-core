@@ -530,3 +530,80 @@ func TestGenesisCLIRejectsNonCanonicalConsensusKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestGenesisCLIValidateReadsOnlyTheValidatorListsTheDocumentStates is #195.
+//
+// `add-genesis-account` run after `coreslot-genesis add` rewrites the document
+// through the SDK's AppGenesis, which has no top-level validators field, so the
+// key is dropped. validate then ran json.Unmarshal on the missing key and failed
+// with "unexpected end of JSON input" on a genesis the chain starts from without
+// complaint — CometBFT takes the validator set from InitChain, which CoreSlot
+// derives from the active slots. An absent or empty list states nothing and is
+// not a fault. A list that is present and non-empty still has to match, in
+// either place it can appear: consensus.validators, which the chain reads, and
+// the top-level key `add` writes.
+func TestGenesisCLIValidateReadsOnlyTheValidatorListsTheDocumentStates(t *testing.T) {
+	cdc := testCodec(t)
+	authority, emergency, operator, payout, settlement := testAddresses()
+	key := testConsensusKeyB64()
+
+	// build returns a home whose genesis has one active slot (and the matching
+	// top-level validators entry `add` writes), after edit has been applied to
+	// the raw document.
+	build := func(t *testing.T, edit func(doc map[string]json.RawMessage)) string {
+		t.Helper()
+		home := t.TempDir()
+		configDir := filepath.Join(home, "config")
+		require.NoError(t, os.MkdirAll(configDir, 0o755))
+		writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+		require.NoError(t, runCLI(t, addGenesisSlotCmd(), home, cdc,
+			operator, payout, settlement, key, testMoniker))
+		doc, _ := readTestGenesis(t, configDir)
+		edit(doc)
+		bz, err := json.Marshal(doc)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(configDir, "genesis.json"), bz, 0o600))
+		return home
+	}
+	matching := json.RawMessage(`[{"pub_key":{"type":"tendermint/PubKeyEd25519","value":"` + key + `"},"power":"1","name":"node0"}]`)
+	wrongPower := json.RawMessage(`[{"pub_key":{"type":"tendermint/PubKeyEd25519","value":"` + key + `"},"power":"7","name":"node0"}]`)
+
+	for _, tc := range []struct {
+		name    string
+		edit    func(doc map[string]json.RawMessage)
+		wantErr string
+	}{
+		{"top-level validators absent (#195)", func(doc map[string]json.RawMessage) { delete(doc, "validators") }, ""},
+		{"top-level validators null", func(doc map[string]json.RawMessage) { doc["validators"] = json.RawMessage(`null`) }, ""},
+		{"top-level validators empty", func(doc map[string]json.RawMessage) { doc["validators"] = json.RawMessage(`[]`) }, ""},
+		{"top-level validators as written by add", func(map[string]json.RawMessage) {}, ""},
+		{"top-level validators with the wrong power", func(doc map[string]json.RawMessage) { doc["validators"] = wrongPower },
+			"validators: CometBFT validator node0 does not match"},
+		{"top-level validators unreadable", func(doc map[string]json.RawMessage) { doc["validators"] = json.RawMessage(`{"not":"a list"}`) },
+			"genesis validators is present but unreadable"},
+		{"consensus.validators matching, top-level absent", func(doc map[string]json.RawMessage) {
+			delete(doc, "validators")
+			doc["consensus"] = json.RawMessage(`{"validators":` + string(matching) + `}`)
+		}, ""},
+		{"consensus.validators with the wrong power", func(doc map[string]json.RawMessage) {
+			delete(doc, "validators")
+			doc["consensus"] = json.RawMessage(`{"validators":` + string(wrongPower) + `}`)
+		}, "consensus.validators: CometBFT validator node0 does not match"},
+		{"consensus.validators naming an extra validator", func(doc map[string]json.RawMessage) {
+			delete(doc, "validators")
+			extra := `{"pub_key":{"type":"tendermint/PubKeyEd25519","value":"` + base64.StdEncoding.EncodeToString(make([]byte, sdked25519.PubKeySize)) + `"},"power":"1","name":"x"}`
+			doc["consensus"] = json.RawMessage(`{"validators":[` + extra + `,` + string(matching[1:len(matching)-1]) + `]}`)
+		}, "consensus.validators: CometBFT validator count 2 does not match active core slots 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := build(t, tc.edit)
+			err := runCLI(t, validateGenesisCmd(), home, cdc)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
