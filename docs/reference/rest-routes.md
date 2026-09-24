@@ -50,6 +50,7 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `SelectionPolicy` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy` | `slot_id` (path, uint64) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy` | 200; 404 if none |
 | `SelectionPolicyVersion` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy/version/{policy_version}` | `slot_id`, `policy_version` (path, uint64) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy/version/1` | 200; 404 if none |
 | `SelectionPolicyAtHeight` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy/height/{at_height}` | `slot_id`, `at_height` (path) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy/height/100` | 200; 404 if none |
+| `PendingAuthorityTransfers` | `/twilight/coreslot/v1/pending-authority-transfers` | — | `QueryPendingAuthorityTransfersResponse` | `curl $REST/twilight/coreslot/v1/pending-authority-transfers` | 200, including when nothing is pending (`"transfers": []`) |
 
 ## x/mining — `twilight.mining.v1.Query`
 
@@ -139,6 +140,18 @@ from what settlement actually does, without anything failing loudly.
   inactive in v1. See [ADR-0002](../architecture/adr/0002-rewards-emission.md).
 - Standard cosmos modules Twilight does **not** run (staking/gov/mint/distribution)
   return `501` by design — that is expected, not a regression.
+- **`PendingAuthorityTransfers` never answers `404`.** It returns every authority
+  nomination awaiting acceptance, for both roles, in role order (`AUTHORITY_ROLE_PRIMARY`,
+  then `AUTHORITY_ROLE_EMERGENCY`). Each entry is the same `PendingAuthorityTransferEntry`
+  genesis exports: `role`, plus `transfer.nominee` and `transfer.nominated_height`. No
+  handover in flight is `200` with `"transfers": []`; a role with no nomination simply has
+  no entry. A stored nomination that cannot be read is `500`, never an empty list. The
+  incumbent is not repeated in the entry: it is `params.authority` /
+  `params.emergency_authority` at the same height (pin both reads with
+  `x-cosmos-block-height`; a height the node has pruned is an error, not an empty list).
+  It shows only nominations that wait: a nominate and accept that land in the same block
+  are never visible here, so detect a completed rotation by comparing `params` against the
+  addresses you expect (or from the `coreslot_authority_accepted` event).
 - **`CoreSlotByConsensusAddress` / `ReservedConsensusAddress` take a hex-encoded
   consensus address** (the keeper rejects bech32 `valcons`). A real hex value is
   available from CometBFT `:26657/validators` (`validators[].address`).
