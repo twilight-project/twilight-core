@@ -63,8 +63,8 @@ jobs:
         # so its own checks need covering: a verifier that stops verifying does not
         # go quiet, it goes green. Three bugs in its first draft each killed a real
         # check while it still reported success. Builds a baseline genesis with the
-        # real binary rather than a fixture that could drift. No chain is run: two
-        # cases start the binary only as far as the InitChain handshake.
+        # real binary rather than a fixture that could drift. No chain is run: a
+        # few cases start the binary only as far as the InitChain handshake.
         run: ./scripts/check-genesis-faults.sh
       - name: CLI surface
         # Same script as `make check-cli-surface`. The Go test asserts the
