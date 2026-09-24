@@ -612,6 +612,12 @@ mutate_raw "an exact duplicate chain_id key" \
 mutate_raw "an exact duplicate authority key inside coreslot params" \
   '!done && /^ *"authority": / { l=$0; sub(/"authority": ".*"/, "\"authority\": \"'"$ATT"'\"", l); print l; done=1 } { print }' \
   shape.unique_keys
+# Inside an ARRAY element: the first payout_address in the text belongs to
+# slots[0]. A duplicate check that only walked object-under-object paths would
+# miss it, and a payout address is where the value goes.
+mutate_raw "an exact duplicate payout_address inside slots[0]" \
+  '!done && /^ *"payout_address": / { l=$0; sub(/"payout_address": ".*"/, "\"payout_address\": \"'"$ATT"'\"", l); print l; done=1 } { print }' \
+  shape.unique_keys
 
 # ---- the InitChain dry-run -------------------------------------------------------------------
 #

@@ -486,6 +486,13 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 if [[ -n "$BIN" ]]; then
   [[ -x "$BIN" ]] || { echo "binary not executable: $BIN" >&2; exit 2; }
+  # A SIGKILL of the whole process group (a CI job timeout, say) takes the
+  # watchdog down with the checker. The probe dies too, but its work directory
+  # stays behind. So each run sweeps this user's own check-genesis.* directories
+  # that are over an hour old; no run lives that long (the dry-run is capped at
+  # 120s), so nothing in use can match.
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'check-genesis.*' -user "$(id -u)" -mmin +60 \
+    -exec rm -rf {} + 2>/dev/null || true
   WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/check-genesis.XXXXXX")"
   VLOG="$WORKDIR/validate.log"
   # Every binary call below that takes a home gets a throwaway one. The CLI's
