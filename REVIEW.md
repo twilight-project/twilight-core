@@ -43,7 +43,9 @@ achievable green state. Such advisories are accepted explicitly in
 [`.govulncheck-allow.json`](.govulncheck-allow.json), each with its reachability path, the
 reason it cannot be fixed, and a **`review_by` date**. Anything reachable and not listed there
 still fails, and an acceptance that passes its `review_by` date also fails, so an exception
-cannot outlive its review. `make vuln` and CI run the same script
+cannot outlive its review. An advisory the Go vulnerability database later **withdraws** is
+removed from the allowlist, not re-justified: there is nothing left to accept, and
+`scripts/vulncheck.sh` reports any entry that is no longer reachable. `make vuln` and CI run the same script
 ([`scripts/vulncheck.sh`](scripts/vulncheck.sh)), so local and CI results cannot drift.
 
 Consensus/economic changes should also be exercised by the relevant **drills**
