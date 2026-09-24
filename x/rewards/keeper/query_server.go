@@ -16,10 +16,11 @@ import (
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
-// epochProjectionHorizon bounds how far ahead a boundary query will walk the
-// schedule. Beyond it the query returns a deterministic not-found rather than an
-// approximated or clamped height (§68). It bounds query work only and is not a
-// protocol value: no consensus path projects boundaries.
+// epochProjectionHorizon bounds how many scheduled entries a boundary query will
+// cross. Beyond it the query returns a deterministic refusal rather than an
+// approximated or clamped height (§68). It counts schedule entries, not epochs,
+// so it does not tighten as the chain ages (#182). It bounds query work only and
+// is not a protocol value: no consensus path projects boundaries.
 const epochProjectionHorizon = 1_000
 
 // maxScheduledEpochConfigsPerPage caps one page of the future schedule. Like the

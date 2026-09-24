@@ -331,7 +331,8 @@ func TestScheduledEpochConfigProjection(t *testing.T) {
 	// would tell a caller a far-future epoch has no configuration when the truth
 	// is only that this query declined to project that far.
 	t.Run("beyond the horizon is refused, never clamped", func(t *testing.T) {
-		_, err := k.ProjectEpochStartHeight(ctx, 10_000, 5)
+		// The horizon counts scheduled entries crossed, and two lie before 10 000.
+		_, err := k.ProjectEpochStartHeight(ctx, 10_000, 1)
 		require.ErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
 		require.NotErrorIs(t, err, types.ErrEpochConfigNotFound,
 			"a horizon must not be reported as an absent configuration")
@@ -353,6 +354,79 @@ func TestScheduledEpochConfigProjection(t *testing.T) {
 		}))
 		_, err := k.ProjectEpochStartHeight(ctx, 3, 100)
 		require.ErrorIs(t, err, types.ErrInvalidState)
+	})
+}
+
+// TestProjectionIsNotBoundedByChainAge pins #182. The horizon bounds scheduled
+// entries crossed, not epochs elapsed, so an old chain with a single version at
+// genesis resolves every boundary — past, current and far future — and the cost
+// of doing so does not grow with how long the chain has run.
+func TestProjectionIsNotBoundedByChainAge(t *testing.T) {
+	k, ctx := historyKeeper(t, anchor(1, minLength))
+
+	for _, epoch := range []uint64{1000, 1001, 1002, 10_000, 1_000_000} {
+		start, err := k.ProjectEpochStartHeight(ctx, epoch, 1)
+		require.NoErrorf(t, err, "epoch %d", epoch)
+		require.Equalf(t, 1+(epoch-1)*minLength, start, "epoch %d", epoch)
+	}
+
+	t.Run("a horizon of zero still answers when no entry is crossed", func(t *testing.T) {
+		start, err := k.ProjectEpochStartHeight(ctx, 5000, 0)
+		require.NoError(t, err)
+		require.Equal(t, 1+4999*uint64(minLength), start)
+	})
+
+	t.Run("overflow far from genesis is corruption, not a horizon", func(t *testing.T) {
+		const maxUint64 = ^uint64(0)
+		_, err := k.ProjectEpochStartHeight(ctx, maxUint64, 1)
+		require.ErrorIs(t, err, types.ErrInvalidState)
+		require.NotErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
+	})
+}
+
+// TestProjectionMatchesTheEpochWalk checks the segment walk against the
+// definitional recurrence — one epoch at a time, applying each scheduled length
+// at its boundary — for every epoch across a schedule with several entries.
+func TestProjectionMatchesTheEpochWalk(t *testing.T) {
+	k, ctx := historyKeeper(t, continuousHistory()...)
+	schedule := map[uint64]uint64{12: maxLength, 13: minLength, 40: 500, 41: 500, 90: maxLength}
+	for epoch, length := range schedule {
+		require.NoError(t, k.ScheduledEpochConfigs.Set(ctx, epoch,
+			types.ScheduledEpochConfig{EffectiveEpoch: epoch, EpochLengthBlocks: length}))
+	}
+
+	// Recurrence from the latest history version (v3: epoch 9 @ 4321, length 360).
+	walk := map[uint64]uint64{9: 4321}
+	height, length := uint64(4321), uint64(minLength)
+	for epoch := uint64(10); epoch <= 120; epoch++ {
+		height += length
+		if next, ok := schedule[epoch]; ok {
+			length = next
+		}
+		walk[epoch] = height
+	}
+
+	for epoch := uint64(9); epoch <= 120; epoch++ {
+		start, err := k.ProjectEpochStartHeight(ctx, epoch, 100)
+		require.NoErrorf(t, err, "epoch %d", epoch)
+		require.Equalf(t, walk[epoch], start, "epoch %d", epoch)
+	}
+
+	// Epochs governed by earlier history versions are unaffected by the schedule.
+	for epoch := uint64(1); epoch < 9; epoch++ {
+		start, err := k.ProjectEpochStartHeight(ctx, epoch, 0)
+		require.NoErrorf(t, err, "epoch %d", epoch)
+		historical, err := k.EpochStartHeight(ctx, epoch)
+		require.NoError(t, err)
+		require.Equalf(t, historical, start, "epoch %d", epoch)
+	}
+
+	t.Run("the horizon counts entries crossed up to and including the target", func(t *testing.T) {
+		// Entries at 12, 13 and 40 lie in (9, 40].
+		_, err := k.ProjectEpochStartHeight(ctx, 40, 3)
+		require.NoError(t, err)
+		_, err = k.ProjectEpochStartHeight(ctx, 40, 2)
+		require.ErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
 	})
 }
 

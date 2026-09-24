@@ -117,36 +117,35 @@ func TestQueriesClassifyAbsenceAsNotFound(t *testing.T) {
 	}
 }
 
-// TestARefusalToComputeIsNotAnAbsence covers the fourth answer, which exists
-// because two conditions previously shared one code.
+// TestAnOldEpochIsNotRefusedForItsAge pins #182 through the gRPC path a
+// consumer uses.
 //
-// EpochBoundaries projects forward by walking the schedule, and it stops after a
-// bounded number of steps. That refusal used to arrive as NotFound, identical to
-// an epoch whose configuration genuinely does not exist — so a consumer asking
-// about a far-future epoch was told the epoch had no configuration when the truth
-// was that the chain declined to look. OutOfRange says the difference: the
-// question was answerable, just not that far ahead.
-func TestARefusalToComputeIsNotAnAbsence(t *testing.T) {
+// EpochBoundaries once counted its projection horizon in epochs from the
+// governing version, which on a single-version chain is genesis — so every
+// boundary past the horizon was refused, past epochs included, and a live chain
+// hit it about three weeks in. The horizon now counts scheduled entries crossed,
+// so an epoch far from genesis answers with the same recurrence history uses.
+//
+// The refusal itself is still OutOfRange rather than NotFound; that contract is
+// held at the handler (TestEpochBoundariesDistinguishesAbsenceFromCorruption),
+// because no transaction can yet write the schedule entries needed to reach it
+// from a booted chain.
+func TestAnOldEpochIsNotRefusedForItsAge(t *testing.T) {
 	chain := bootPinnedChain(t)
 	chain.commitThrough(t, 3)
-	querier := newHeaderQuerier(chain.app)
 
-	beyond := classificationCase{
-		name:   "rewards epoch beyond the projection horizon",
-		method: "/twilight.rewards.v1.Query/EpochBoundaries",
-		req:    &rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 100_000_000},
-		want:   codes.OutOfRange,
-	}
-	require.Equal(t, codes.OutOfRange, classify(t, querier, beyond),
-		"a bounded projection that refused to walk is not a missing configuration")
-
-	// And the distinction is only meaningful if a reachable epoch still answers,
-	// so the horizon is a horizon rather than a blanket refusal.
-	var near rewardstypes.QueryEpochBoundariesResponse
+	var near, far rewardstypes.QueryEpochBoundariesResponse
 	queryAtHeight(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
 		&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 2}, &near, chain.head)
+	queryAtHeight(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
+		&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 100_000_000}, &far, chain.head)
+
 	require.Equal(t, uint64(2), near.EpochNumber)
-	require.NotZero(t, near.StartHeight)
+	require.NotZero(t, near.EpochLengthBlocks)
+	require.Equal(t, uint64(100_000_000), far.EpochNumber)
+	require.Equal(t, near.EpochLengthBlocks, far.EpochLengthBlocks)
+	require.Equal(t, near.StartHeight+(100_000_000-2)*near.EpochLengthBlocks, far.StartHeight,
+		"with no schedule, a far epoch is the history recurrence, not a refusal")
 }
 
 // TestQueriesClassifyMalformedRequestsAsInvalidArgument covers the arm that is
