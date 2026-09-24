@@ -3,14 +3,18 @@ package app_test
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"math/big"
 	goruntime "runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
+	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/hashicorp/go-metrics"
+	metricsprom "github.com/hashicorp/go-metrics/prometheus"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	sdkmath "cosmossdk.io/math"
@@ -20,41 +24,44 @@ import (
 
 // The telemetry contract.
 //
-// Metrics are the one thing this app does after a block that is not consensus,
-// and the proof that they stay that way is not an argument about where the code
-// sits but a chain run twice: once with telemetry off, once with it on, with
-// every app hash compared. The second proof is that what is exported is what the
-// operator documentation says, name by name, against a chain whose state is
-// known.
+// Metrics are the one thing this app does after a block that is not consensus.
+// Three proofs keep them that way. A chain run twice, once with telemetry off
+// and once on, with every app hash compared. A store-operation trace of the
+// exporter across the states that change which reads it performs, requiring
+// that no write or delete reaches the root multistore. And a gather of what is
+// exported, name by name and value by value, against a chain whose state is
+// known, so the operator documentation cannot drift from the binary.
 
-// The Prometheus sink registers with the process-global registry and can be
-// created only once per process, so it is created lazily and shared. Enabling
-// and disabling afterwards touches only the SDK's telemetry flag, which is what
-// gates every emission: telemetry.New with Enabled=false returns before it
-// builds a sink, and EnableTelemetry sets the flag alone.
-var (
-	prometheusOnce    sync.Once
-	prometheusMetrics *telemetry.Metrics
-	prometheusErr     error
-)
-
-func enablePrometheusTelemetry(t *testing.T) *telemetry.Metrics {
+// enableTelemetry turns the SDK telemetry flag on for the test and routes the
+// global go-metrics sink to a Prometheus registry private to this test. The
+// returned gather reads that registry.
+//
+// Deliberately not telemetry.New: it registers its sink with the process-global
+// Prometheus registry, which can be done once per process, and every series any
+// test ever exported would then be visible to every later test. A private
+// registry per test makes "every exported series is documented" mean this
+// test's series and nothing else. The SDK flag is process-global regardless,
+// which is why the cleanup clears it.
+func enableTelemetry(t *testing.T) func() map[string]float64 {
 	t.Helper()
-	prometheusOnce.Do(func() {
-		prometheusMetrics, prometheusErr = telemetry.New(telemetry.Config{
-			Enabled:                 true,
-			EnableHostname:          false,
-			EnableHostnameLabel:     false,
-			PrometheusRetentionTime: 3600,
-		})
+	registry := prometheus.NewRegistry()
+	sink, err := metricsprom.NewPrometheusSinkFrom(metricsprom.PrometheusOpts{
+		Registerer: registry,
+		Expiration: time.Hour,
 	})
-	require.NoError(t, prometheusErr)
-	require.NotNil(t, prometheusMetrics)
+	require.NoError(t, err)
+	conf := metrics.DefaultConfig("")
+	conf.EnableHostname = false
+	conf.EnableRuntimeMetrics = false
+	_, err = metrics.NewGlobal(conf, sink)
+	require.NoError(t, err)
 	telemetry.EnableTelemetry()
 	t.Cleanup(disableTelemetry)
-	return prometheusMetrics
+	return func() map[string]float64 { return gatherMetrics(t, registry) }
 }
 
+// disableTelemetry clears the SDK flag without touching any sink:
+// telemetry.New with Enabled=false returns before it builds one.
 func disableTelemetry() {
 	_, _ = telemetry.New(telemetry.Config{Enabled: false})
 }
@@ -85,7 +92,7 @@ func TestTelemetryDoesNotChangeTheAppHash(t *testing.T) {
 	disableTelemetry()
 	_, disabled := runChain(t, through)
 
-	metrics := enablePrometheusTelemetry(t)
+	gather := enableTelemetry(t)
 	require.True(t, telemetry.IsTelemetryEnabled())
 	_, enabled := runChain(t, through)
 
@@ -94,12 +101,68 @@ func TestTelemetryDoesNotChangeTheAppHash(t *testing.T) {
 
 	// The enabled run must actually have exported, or the equality proves
 	// nothing: the last commit of the third epoch is what the gauge shows.
-	values := gatherMetrics(t, metrics)
-	require.Equal(t, float64(3), values["twilight_rewards_current_epoch"])
+	require.Equal(t, float64(3), gather()["twilight_rewards_current_epoch"])
+}
+
+// The exporter reads through a cache of the committed multistore. This traces
+// every store operation at the root while it runs and requires that none is a
+// write or a delete: the app-hash test above proves the states it happens to
+// reach, this proves the mechanism, in the states that change which reads
+// happen — a pending pause transition and an applied pause. Reads are required
+// to be present so the trace is known to be watching the stores the exporter
+// uses.
+func TestTelemetryExporterWritesNothingToTheRootStore(t *testing.T) {
+	enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+
+	ops := tracedExport(t, chain)
+	require.Positive(t, ops["read"], "the trace saw no reads: it is not watching the exporter")
+	require.Zero(t, ops["write"]+ops["delete"], "ops: %v", ops)
+
+	require.NoError(t, chain.app.RewardsKeeper.SchedulePauseTransition(chain.headContext(), chain.head, true))
+	ops = tracedExport(t, chain)
+	require.Positive(t, ops["read"])
+	require.Zero(t, ops["write"]+ops["delete"], "pending pause, ops: %v", ops)
+
+	chain.commitThrough(t, chain.head+2)
+	snap, err := chain.app.RewardsKeeper.TelemetrySnapshot(chain.headContext())
+	require.NoError(t, err)
+	require.True(t, snap.Paused, "the pause did not apply; the paused state was not exercised")
+	ops = tracedExport(t, chain)
+	require.Positive(t, ops["read"])
+	require.Zero(t, ops["write"]+ops["delete"], "paused, ops: %v", ops)
+}
+
+// tracedExport runs the exporter with the SDK store tracer attached to the root
+// multistore and returns a count of every operation the trace recorded. A cache
+// created while the tracer is attached wraps each root store in the tracer, so
+// reads that fall through the cache are recorded and a write that reached the
+// root would be too.
+func tracedExport(t *testing.T, chain *pinnedChain) map[string]int {
+	t.Helper()
+	var trace bytes.Buffer
+	cms := chain.app.CommitMultiStore()
+	cms.SetTracer(&trace)
+	chain.app.EmitTelemetryForTest()
+	cms.SetTracer(nil)
+
+	ops := map[string]int{}
+	scanner := bufio.NewScanner(&trace)
+	scanner.Buffer(make([]byte, 1<<20), 1<<24)
+	for scanner.Scan() {
+		var op struct {
+			Operation string `json:"operation"`
+		}
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &op))
+		ops[op.Operation]++
+	}
+	require.NoError(t, scanner.Err())
+	return ops
 }
 
 func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
-	metrics := enablePrometheusTelemetry(t)
+	gather := enableTelemetry(t)
 	chain := bootPinnedChain(t)
 	// Two blocks into epoch 2: epoch 1 has finalized and materialized, the open
 	// counter has credited exactly two blocks, and nothing is paused.
@@ -121,7 +184,7 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 	require.True(t, rewards.OutstandingLiability.IsPositive(), "epoch 1 created no entitlement")
 	require.True(t, rewards.EscrowBalance.IsPositive())
 
-	values := gatherMetrics(t, metrics)
+	values := gather()
 	expected := map[string]float64{
 		"twilight_rewards_current_epoch":                                   2,
 		"twilight_rewards_current_epoch_start_height":                      float64(epochLength + 1),
@@ -155,38 +218,49 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		require.True(t, found, "metric %s is not exported", name)
 		require.Equal(t, want, got, "metric %s", name)
 	}
-	// Every exported twilight_ series is a documented one: an undocumented gauge
-	// is a name an operator cannot look up.
+	// Every series this app exports is a documented one: an undocumented gauge
+	// is a name an operator cannot look up, and a read-failure counter here
+	// means a snapshot failed on a healthy chain. The registry is this test's
+	// own, so nothing another test exported can appear here; what can appear
+	// is the SDK's own module-manager timing series, which share the sink and
+	// are not this app's to document.
 	for name := range values {
-		if strings.HasPrefix(name, "twilight") {
-			_, documented := expected[name]
-			require.True(t, documented, "metric %s is exported but not documented", name)
-		}
-	}
-	_, failures := values[`twilight_telemetry_read_failures_total{module="rewards"}`]
-	require.False(t, failures, "a snapshot read failed")
-}
-
-// gatherMetrics renders the Prometheus exposition and indexes every sample by
-// its full series name, labels included, exactly as a scrape would see it.
-func gatherMetrics(t *testing.T, metrics *telemetry.Metrics) map[string]float64 {
-	t.Helper()
-	res, err := metrics.Gather(telemetry.FormatPrometheus)
-	require.NoError(t, err)
-	values := map[string]float64{}
-	scanner := bufio.NewScanner(bytes.NewReader(res.Metrics))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
+		if !strings.HasPrefix(name, "twilight") {
 			continue
 		}
-		split := strings.LastIndex(line, " ")
-		require.Positive(t, split, line)
-		value, err := strconv.ParseFloat(line[split+1:], 64)
-		require.NoError(t, err, line)
-		values[line[:split]] = value
+		_, documented := expected[name]
+		require.True(t, documented, "metric %s is exported but not documented", name)
 	}
-	require.NoError(t, scanner.Err())
+}
+
+// gatherMetrics indexes every sample in the registry by its full series name,
+// labels included, exactly as a scrape would render it.
+func gatherMetrics(t *testing.T, registry *prometheus.Registry) map[string]float64 {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	values := map[string]float64{}
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			labels := make([]string, 0, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				labels = append(labels, fmt.Sprintf("%s=%q", label.GetName(), label.GetValue()))
+			}
+			name := family.GetName()
+			if len(labels) > 0 {
+				name += "{" + strings.Join(labels, ",") + "}"
+			}
+			// Summaries are the SDK's own begin/end-blocker timings, which the
+			// module manager emits into the same global sink once telemetry is
+			// on; this app exports only gauges and counters.
+			switch {
+			case metric.GetGauge() != nil:
+				values[name] = metric.GetGauge().GetValue()
+			case metric.GetCounter() != nil:
+				values[name] = metric.GetCounter().GetValue()
+			}
+		}
+	}
 	return values
 }
 
