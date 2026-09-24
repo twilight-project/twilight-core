@@ -52,7 +52,16 @@ twilightd tx coreslot nominate-authority primary twilight1<successor> \
 
 Nothing has changed yet. The incumbent still holds every capability, and the nominee holds none.
 Verify that before continuing — an incumbent that has already lost the role is a different and
-much worse situation than a pending nomination.
+much worse situation than a pending nomination:
+
+```bash
+twilightd coreslot-query pending-authority-transfers --output json
+twilightd coreslot-query params --output json | jq '.params | {authority, emergency_authority}'
+```
+
+The first must show exactly the nomination you intended — right role, right nominee — and the
+second must still show the incumbent. The successor should run the same check independently
+before accepting, rather than accepting on the incumbent's word. See [Verifying](#verifying).
 
 The nominee is checked at this point. A module account, a bank-blocked address or the all-zero
 address is refused outright: nobody can sign for those, so installing one would end the role
@@ -104,16 +113,50 @@ Both are signed by the current holder, which is what makes a mistaken nomination
 
 ## Verifying
 
-The rotation is visible in parameters:
+A completed rotation is visible in parameters:
 
 ```bash
 twilightd coreslot-query params --output json | jq '.params | {authority, emergency_authority}'
 ```
 
-There is currently **no query for a pending nomination**. Until one exists, a nomination is
-visible in the transaction's events (`coreslot_authority_nominated`, carrying the role, the
-nominating authority and the nominee), and in an exported genesis document under
-`app_state.coreslot.pending_authority_transfers`.
+A rotation **in flight** — nominated, not yet accepted or canceled — is visible in the
+pending-nomination query, for both roles at once:
+
+```bash
+twilightd coreslot-query pending-authority-transfers --output json
+# the same, generated tree:   twilightd query coreslot pending-authority-transfers
+# the same, REST:             curl $REST/twilight/coreslot/v1/pending-authority-transfers
+```
+
+```json
+{
+  "transfers": [
+    {
+      "role": "AUTHORITY_ROLE_PRIMARY",
+      "transfer": { "nominee": "twilight1<successor>", "nominated_height": "1234" }
+    }
+  ]
+}
+```
+
+- One entry per role with a nomination pending, primary first. A role with no entry has no
+  handover in flight.
+- `"transfers": []` means **nothing is pending for either role**. It is a successful answer, not
+  an error; the query never answers "not found".
+- `nominated_height` is the block the nomination was included in (for a nomination carried in
+  genesis, whatever height the document stated). Add `--height <h>` to see
+  what was pending at an earlier height, and read `params` at the same height for the incumbent.
+- The nominating address is not stored. It is the incumbent at `nominated_height`, and it is also
+  in that transaction's `coreslot_authority_nominated` event.
+
+**Treat an entry you did not expect as an incident.** A nomination can only be made by the
+current holder of the role, so an unexplained one means the role's key is being used by someone
+else — or the chain launched from a genesis that carried a nomination nobody approved. There is
+no timelock: a nominee can accept in the next block. Cancel it immediately with
+`cancel-authority-nomination` (signed by the incumbent key, so this works only while that key is
+still yours), then treat the key as compromised and rotate it to a fresh one. Nodes export
+`twilight_coreslot_pending_authority_nomination{role}`, which is 1 while a nomination is pending;
+alert on it (see the monitoring guide), and use this query to see **who** is nominated.
 
 > **Note on `update-params`:** the output of `coreslot-query params` cannot currently be fed
 > straight back into `coreslot update-params` — the query renders numbers as JSON strings and the
@@ -123,10 +166,15 @@ nominating authority and the nominee), and in an exported genesis document under
 
 ## Genesis
 
-A fresh genesis carries no pending nominations, and `coreslot-genesis set-authorities` sets both
-roles directly. Note that a genesis produced by plain `twilightd init` seeds both fields with
-**module addresses**, which nobody can sign for — a chain launched without running
-`set-authorities` is ungovernable from block one.
+A fresh genesis should carry no pending nominations, and `coreslot-genesis set-authorities` sets
+both roles directly. Genesis validation does **not** require the list to be empty, so check
+`app_state.coreslot.pending_authority_transfers` is `[]` before signing off on a launch genesis,
+and run `coreslot-query pending-authority-transfers` once the chain is up: a nomination carried in
+genesis can be accepted by its nominee at any height.
+
+Note that a genesis produced by plain `twilightd init` seeds both fields with **module
+addresses**, which nobody can sign for — a chain launched without running `set-authorities` is
+ungovernable from block one.
 
 Pending nominations survive export and import, so a captured state does not strand a rotation
 that was in flight.

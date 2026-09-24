@@ -1939,6 +1939,29 @@
         ]
       }
     },
+    "/twilight/coreslot/v1/pending-authority-transfers": {
+      "get": {
+        "summary": "PendingAuthorityTransfers returns every authority nomination awaiting\nacceptance, for both roles in one answer. No nomination is an empty list and\na success, never NotFound.",
+        "operationId": "Query_PendingAuthorityTransfers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryPendingAuthorityTransfersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/coreslot/v1/pending-key-rotations": {
       "get": {
         "operationId": "Query_PendingKeyRotations",
@@ -4676,6 +4699,16 @@
       },
       "description": "Vote represents a prevote or precommit vote from validators for\nconsensus."
     },
+    "v1AuthorityRole": {
+      "type": "string",
+      "enum": [
+        "AUTHORITY_ROLE_UNSPECIFIED",
+        "AUTHORITY_ROLE_PRIMARY",
+        "AUTHORITY_ROLE_EMERGENCY"
+      ],
+      "default": "AUTHORITY_ROLE_UNSPECIFIED",
+      "description": "AuthorityRole names the two operational authority roles carried in Params.\n\nBoth are ordinary signable account addresses, NOT the module accounts supplied\nto x/upgrade, bank and consensus. A module account in either field is\nunspendable, so installing one permanently removes the capability that field\ngates."
+    },
     "v1DistributionMethod": {
       "type": "string",
       "enum": [
@@ -4960,6 +4993,31 @@
         }
       }
     },
+    "v1PendingAuthorityTransfer": {
+      "type": "object",
+      "properties": {
+        "nominee": {
+          "type": "string"
+        },
+        "nominated_height": {
+          "type": "string",
+          "format": "int64"
+        }
+      },
+      "description": "PendingAuthorityTransfer is a nomination awaiting acceptance by its nominee.\n\nIt deliberately carries neither the role nor the nominating address. The role\nis the collection key, so storing it here too would create two places that\ncould disagree; the incumbent remains in Params until acceptance, so recording\nit here would duplicate a value the chain already holds. Auditability of who\nnominated whom comes from the event emitted at nomination."
+    },
+    "v1PendingAuthorityTransferEntry": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/v1AuthorityRole"
+        },
+        "transfer": {
+          "$ref": "#/definitions/v1PendingAuthorityTransfer"
+        }
+      },
+      "description": "PendingAuthorityTransferEntry pairs a transfer with its role for genesis,\nwhere there is no collection key to carry it."
+    },
     "v1PendingKeyRotation": {
       "type": "object",
       "properties": {
@@ -5206,6 +5264,19 @@
         }
       },
       "description": "QueryOpenSettlementsResponse returns canonical settlement rows.\n\nThe per-request bound is on canonical rows INSPECTED, not on results returned, so\na page may contain fewer results than the limit — or none — while more open\nsettlements exist further on. Follow next_key until it comes back empty; an empty\npage is not proof that a Slot has no outstanding work."
+    },
+    "v1QueryPendingAuthorityTransfersResponse": {
+      "type": "object",
+      "properties": {
+        "transfers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1PendingAuthorityTransferEntry"
+          }
+        }
+      },
+      "description": "transfers holds one entry per role that has a nomination in flight, in role\norder (primary, then emergency). Each entry names its role explicitly, so an\nabsent nomination is an absent entry rather than an entry whose fields happen\nto be empty. An empty list means no handover is in flight for either role.\n\nThe entry is the same message genesis exports, so a pending transfer has one\nwire shape wherever it is read. The incumbent is not repeated here: it is\nParams at the same height."
     },
     "v1QueryPendingKeyRotationsResponse": {
       "type": "object",

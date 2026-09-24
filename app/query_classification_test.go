@@ -12,6 +12,8 @@ import (
 
 	grpctypes "github.com/cosmos/cosmos-sdk/types/grpc"
 
+	"github.com/twilight-project/twilight-core/app"
+	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
@@ -170,6 +172,52 @@ func TestARefusalToComputeIsNotAnAbsence(t *testing.T) {
 	}
 	require.Equal(t, codes.OutOfRange, classify(t, querier, unrepresentable),
 		"an unrepresentable boundary is a refusal, not a missing configuration and not corruption")
+}
+
+// TestNoPendingNominationIsAnAnswerNotAnAbsence pins the fourth kind of query:
+// one that asks what is in flight rather than after a particular object, and so
+// has no absence arm and no malformed arm at all. PendingAuthorityTransfers takes
+// no argument, and "nothing is pending" is its ordinary reply — a success with an
+// empty list. Answering NotFound would make the most reassuring answer an
+// operator can get look like an error, and teach clients to treat that error as
+// safe to ignore.
+//
+// It then proves the answer tracks committed state through the height header: a
+// nomination appears at the height it was committed and is absent at the height
+// before, which is how an operator dates an unexpected one.
+func TestNoPendingNominationIsAnAnswerNotAnAbsence(t *testing.T) {
+	const method = "/twilight.coreslot.v1.Query/PendingAuthorityTransfers"
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, 3)
+	querier := newHeaderQuerier(chain.app)
+
+	ask := func(height int64) []*coreslottypes.PendingAuthorityTransferEntry {
+		t.Helper()
+		reply, err := querier.call(t, method, &coreslottypes.QueryPendingAuthorityTransfersRequest{}, height)
+		require.NoError(t, err, "no pending nomination is an answer, never NotFound")
+		return reply.(*coreslottypes.QueryPendingAuthorityTransfersResponse).Transfers
+	}
+	require.Empty(t, ask(0))
+
+	nominee := acc(0x5a)
+	_, err := coreslotkeeper.NewMsgServer(chain.app.CoreSlotKeeper).NominateAuthority(chain.headContext(),
+		&coreslottypes.MsgNominateAuthority{
+			Authority: app.AuthorityAddress(),
+			Role:      coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
+			Nominee:   nominee,
+		})
+	require.NoError(t, err)
+	// The head context stamps the head's height, and the write is committed by the
+	// next block; a signed transaction would stamp the block that includes it.
+	// Either way the record is absent from every version before the one holding it.
+	before := chain.head
+	chain.commitThrough(t, before+1)
+
+	require.Equal(t, []*coreslottypes.PendingAuthorityTransferEntry{{
+		Role:     coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
+		Transfer: &coreslottypes.PendingAuthorityTransfer{Nominee: nominee, NominatedHeight: before},
+	}}, ask(chain.head))
+	require.Empty(t, ask(before), "a height before the nomination was committed must not show it")
 }
 
 // TestQueriesClassifyMalformedRequestsAsInvalidArgument covers the arm that is

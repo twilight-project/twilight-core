@@ -55,6 +55,8 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.SelectionPolicyVersion(ctx, v)
 	case *types.QuerySelectionPolicyAtHeightRequest:
 		return qc.SelectionPolicyAtHeight(ctx, v)
+	case *types.QueryPendingAuthorityTransfersRequest:
+		return qc.PendingAuthorityTransfers(ctx, v)
 	}
 	return nil, fmt.Errorf("unsupported query request %T", req)
 }
@@ -137,6 +139,11 @@ func buildQueryCmd() (*cobra.Command, []querySpec) {
 			}
 			height, e := strconv.ParseInt(a[1], 10, 64)
 			return &types.QuerySelectionPolicyAtHeightRequest{SlotId: id, AtHeight: height}, e
+		}),
+		// Both roles in one answer; an empty list means no handover is in flight.
+		// The incumbent is `params` at the same height.
+		add("pending-authority-transfers", cobra.NoArgs, func([]string) (interface{}, error) {
+			return &types.QueryPendingAuthorityTransfersRequest{}, nil
 		}),
 	)
 	return cmd, specs

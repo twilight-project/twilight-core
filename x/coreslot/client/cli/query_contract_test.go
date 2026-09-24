@@ -88,6 +88,11 @@ func (c *recordingQueryClient) SelectionPolicyAtHeight(_ context.Context, _ *typ
 	return &types.QuerySelectionPolicyResponse{}, nil
 }
 
+func (c *recordingQueryClient) PendingAuthorityTransfers(_ context.Context, _ *types.QueryPendingAuthorityTransfersRequest, _ ...grpc.CallOption) (*types.QueryPendingAuthorityTransfersResponse, error) {
+	c.called = "PendingAuthorityTransfers"
+	return &types.QueryPendingAuthorityTransfersResponse{}, nil
+}
+
 // TestQuerySurfaceMatchesPinnedContract holds this query surface to the
 // hand-written contract in internal/queryapi.
 //

@@ -134,6 +134,8 @@ check_custom /twilight/coreslot/v1/slots/1/selection-policy/version/1
 check_custom /twilight/coreslot/v1/slots/1/selection-policy/height/1
 check_custom /twilight/coreslot/v1/pending-key-rotations
 check_custom /twilight/coreslot/v1/last-applied-validators
+# Nothing pending is a 200 with an empty list, not a 404.
+check_custom /twilight/coreslot/v1/pending-authority-transfers
 
 echo
 echo "-- x/coreslot parameterized routes (real fixtures, expect 200) --"

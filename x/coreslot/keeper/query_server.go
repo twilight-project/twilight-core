@@ -267,6 +267,47 @@ func (q queryServer) PendingKeyRotations(ctx context.Context, _ *types.QueryPend
 	return resp, nil
 }
 
+// PendingAuthorityTransfers returns every nomination awaiting acceptance.
+//
+// This is the only live view of a handover in flight. Without it a nomination is
+// visible only in the event of the transaction that made it, or in an exported
+// genesis — and an unexpected nomination is the first on-chain sign that an
+// authority key is in someone else's hands, or that a launch genesis carried a
+// handover nobody approved (#185).
+//
+// No nomination is an empty list, not NotFound. Nobody asked after a particular
+// object, so there is nothing whose absence could be an answer; the question is
+// "what is in flight", and "nothing" is its ordinary reply. A read failure is
+// Internal for the same reason as the rotation queue: a caller told there is no
+// pending handover, when the record of one cannot be read, has been reassured by
+// a broken database.
+//
+// The walk is bounded by construction. Every write path — the message server
+// and genesis import — admits only the two operational roles, so the collection
+// holds at most two entries, and Int32Key iterates them in role order. A stored
+// key outside those two roles is refused as corruption rather than rendered: it
+// is state no write path could have produced, and presenting it under a role
+// name the caller does not recognize would hide the contradiction.
+func (q queryServer) PendingAuthorityTransfers(ctx context.Context, _ *types.QueryPendingAuthorityTransfersRequest) (*types.QueryPendingAuthorityTransfersResponse, error) {
+	resp := &types.QueryPendingAuthorityTransfersResponse{}
+	err := q.PendingAuthority.Walk(ctx, nil, func(key int32, transfer types.PendingAuthorityTransfer) (bool, error) {
+		role := types.AuthorityRole(key)
+		if _, err := authorityRoleKey(role); err != nil {
+			// A plain error, deliberately not the wrapped module sentinel: a
+			// registered SDK error carries its own GRPCStatus (Unknown), which
+			// mandatoryStateError would pass through instead of classifying.
+			return true, fmt.Errorf("a nomination is stored under key %d, which is not an authority role", key)
+		}
+		transferCopy := transfer
+		resp.Transfers = append(resp.Transfers, &types.PendingAuthorityTransferEntry{Role: role, Transfer: &transferCopy})
+		return false, nil
+	})
+	if err != nil {
+		return nil, mandatoryStateError("the pending authority nominations", err)
+	}
+	return resp, nil
+}
+
 func (q queryServer) LastAppliedValidators(ctx context.Context, _ *types.QueryLastAppliedValidatorsRequest) (*types.QueryLastAppliedValidatorsResponse, error) {
 	resp := &types.QueryLastAppliedValidatorsResponse{}
 	err := q.LastApplied.Walk(ctx, nil, func(_ string, validator types.LastAppliedValidator) (bool, error) {
