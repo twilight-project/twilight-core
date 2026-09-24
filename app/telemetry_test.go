@@ -134,6 +134,40 @@ func TestTelemetryExporterWritesNothingToTheRootStore(t *testing.T) {
 	require.Zero(t, ops["write"]+ops["delete"], "paused, ops: %v", ops)
 }
 
+// The tracer test above cannot tell "the exporter did not write" from "the
+// exporter wrote into a copy that was thrown away": under a context over the
+// live root store it would pass for exactly as long as no snapshot happens to
+// write. This pins the discard mechanism itself. A deliberate write through the
+// exporter's own context — the pause flag flipped and stored — must leave the
+// root multistore's working hash unchanged, reach the root trace as no write,
+// and leave the root reading the original value.
+func TestTelemetryAWriteThroughTheExporterContextNeverReachesTheRoot(t *testing.T) {
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+	cms := chain.app.CommitMultiStore()
+	before := cms.WorkingHash()
+
+	var trace bytes.Buffer
+	cms.SetTracer(&trace)
+	ctx := chain.app.TelemetryContextForTest()
+	pause, err := chain.app.RewardsKeeper.GetPauseState(ctx)
+	require.NoError(t, err)
+	pause.CurrentPaused = !pause.CurrentPaused
+	require.NoError(t, chain.app.RewardsKeeper.PauseState.Set(ctx, pause))
+	// The write is visible inside the context it was made through, so the
+	// context is proven to be one a write can be made through at all.
+	inside, err := chain.app.RewardsKeeper.GetPauseState(ctx)
+	require.NoError(t, err)
+	require.Equal(t, pause.CurrentPaused, inside.CurrentPaused)
+	cms.SetTracer(nil)
+
+	require.NotContains(t, trace.String(), `"operation":"write"`)
+	require.Equal(t, before, cms.WorkingHash(), "a write through the exporter context reached the root store")
+	root, err := chain.app.RewardsKeeper.GetPauseState(chain.headContext())
+	require.NoError(t, err)
+	require.NotEqual(t, pause.CurrentPaused, root.CurrentPaused, "the root store took the write")
+}
+
 // tracedExport runs the exporter with the SDK store tracer attached to the root
 // multistore and returns a count of every operation the trace recorded. A cache
 // created while the tracer is attached wraps each root store in the tracer, so

@@ -107,16 +107,7 @@ func (a *App) emitTelemetry() {
 
 	emitBuildInfo()
 
-	// A context over a cache of the committed multistore, at the committed
-	// height. Reads fall through to the committed stores; a write would stop in
-	// the cache, which nothing ever writes back. It is not a block context: no
-	// module cache, no event manager anything will read.
-	ctx := sdk.NewContext(
-		a.CommitMultiStore().CacheMultiStore(),
-		cmtproto.Header{Height: a.LastBlockHeight()},
-		false,
-		a.Logger(),
-	)
+	ctx := a.telemetryContext()
 
 	if snap, err := a.CoreSlotKeeper.TelemetrySnapshot(ctx); err != nil {
 		a.reportTelemetryReadFailure(coreslottypes.ModuleName, err)
@@ -133,6 +124,26 @@ func (a *App) emitTelemetry() {
 	} else {
 		emitMiningTelemetry(snap)
 	}
+}
+
+// telemetryContext is the context every snapshot is read through: a cache of the
+// committed multistore, at the committed height. Reads fall through to the
+// committed stores; a write stops in the cache, which nothing ever writes back.
+// It is not a block context: no module cache, no event manager anything will
+// read.
+//
+// This is a seam on purpose. The tracer test proves the exporter issues no
+// write, but on its own it cannot tell "did not write" from "wrote into a copy
+// that was thrown away" — so a second test makes a deliberate write through
+// this context and requires the root store to be unchanged. Building the
+// context anywhere else would put it out of that test's reach.
+func (a *App) telemetryContext() sdk.Context {
+	return sdk.NewContext(
+		a.CommitMultiStore().CacheMultiStore(),
+		cmtproto.Header{Height: a.LastBlockHeight()},
+		false,
+		a.Logger(),
+	)
 }
 
 func (a *App) reportTelemetryReadFailure(module string, err error) {

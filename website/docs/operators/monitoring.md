@@ -42,6 +42,10 @@ prometheus = true
 prometheus_listen_addr = "10.0.0.5:26660"
 ```
 
+The `prometheus_listen_addr` that `twilightd init` writes is `":26660"`, which
+binds **every** interface. Setting `prometheus = true` alone is therefore not enough:
+you MUST also override the address to the private one, or the endpoint is public.
+
 The SDK sink registers in the process-global Prometheus registry, and CometBFT's
 `prometheus_listen_addr` endpoint serves that whole registry. So the one endpoint
 carries CometBFT's consensus metrics (block height, rounds, peers, mempool) **and**
@@ -61,8 +65,9 @@ Full nodes that already run the API server have a second option: with the same
 `[telemetry]` block, the API server serves the series at
 `/metrics?format=prometheus` on `[api] address`. That address defaults to
 `localhost` — leave it there or on a private interface, and treat it like the RPC,
-since it is also the REST surface. Without `format=prometheus` the endpoint returns
-the SDK's own text format, and with `prometheus-retention-time = 0` it returns 400.
+since it is also the REST surface. Without `format=prometheus` (the default, and
+`format=text`) the endpoint returns the SDK's in-memory sink as JSON, which
+Prometheus cannot scrape; with `prometheus-retention-time = 0` it returns 400.
 
 ### Where the gauges come from
 
@@ -165,7 +170,7 @@ testnet's 360-block epochs; scale to your epoch length.
 | Condition | Expression | Why |
 |---|---|---|
 | Accrual stalled | `increase(twilight_rewards_open_reward_enabled_blocks[10m]) == 0 and twilight_rewards_paused == 0 and increase(twilight_rewards_current_epoch[10m]) == 0` | Blocks are committing but no reward-enabled block is being credited |
-| Epoch not finalizing | `changes(twilight_rewards_last_finalized_epoch[1h]) == 0` (window ≈ 2× the epoch's wall-clock length: 360 blocks × 5 s = 30 min) | A finalization boundary passed without a finalized epoch |
+| Epoch not finalizing | `changes(twilight_rewards_last_finalized_epoch[1h]) == 0` with `for: 1h` (window ≈ 2× the epoch's wall-clock length: 360 blocks × 5 s = 30 min; the `for` keeps a freshly appeared series, which has no changes yet, from firing) | A finalization boundary passed without a finalized epoch. **Pair with the liveness alert below:** during a full halt the gauge expires and this expression returns nothing |
 | Materialization behind | `twilight_rewards_last_finalized_epoch - twilight_mining_last_processed_reward_epoch > 0` for more than one block | A finalized epoch has no settlement set |
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
@@ -173,8 +178,11 @@ testnet's 360-block epochs; scale to your epoch length.
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 
-`absent(twilightd_build_info)` on a node whose metrics endpoint is up means it has
-not committed within the retention window, which is itself a liveness signal.
+**Liveness:** `absent(twilightd_build_info)` on a node whose metrics endpoint is up
+means it has not committed within the retention window. Every `twilight_*` gauge
+expires with it, so each stall alert above returns *no data* — not a firing
+condition — during a full halt; this alert is what fires then, and it is not
+optional alongside them.
 
 ## Signals via queries
 
