@@ -9,15 +9,21 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"cosmossdk.io/collections"
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/app"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
+	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
@@ -39,8 +45,9 @@ import (
 // served query of x/rewards, x/mining and x/coreslot the questions a consumer asks
 // at the head: about the current epoch, about recent history, about epoch 1 and
 // about the epoch after this one. Every method the app registers must be here —
-// the set is enumerated from the real gRPC registration, so a query cannot be
-// added without joining the harness — and none may answer Internal or Unknown.
+// the set is enumerated from the real gRPC registration and checked against the
+// generated service descriptors, so a query cannot be added without joining the
+// harness — and none may answer Internal or Unknown.
 //
 // # How the chain is aged, and why not by producing blocks
 //
@@ -53,88 +60,114 @@ import (
 //
 // A fixture cannot be imported either. Fresh-genesis validation in every module
 // deliberately refuses a document that describes an aged chain — an open epoch
-// other than 1, a settlement cursor other than 0 — and continuation import does
-// not exist yet. That refusal is correct and is not worked around here.
+// other than 1, a settlement cursor other than 0, a finalized epoch — and
+// continuation import does not exist yet. That refusal is correct and is not
+// worked around here.
 //
 // What is done instead is a hybrid, in three steps:
 //
 //  1. The chain is booted with its FIRST block at the height epoch N would start
 //     on a chain born at height 1, through the real InitChain, and produces that
 //     block for real.
-//  2. The committed state is re-anchored to the shape an exported N-epoch-old
-//     chain has: the single epoch-config version effective at epoch 1 from height
-//     1, the open epoch N, the participation of that first block credited to N,
-//     the mining cursor one epoch behind N, and a settlement clock that has ticked
-//     once per block since height 1. Nothing else is fabricated: no finalized
-//     epochs, no entitlements, no settlements. Those are produced by the next
-//     step, by consensus.
+//  2. The committed state is rewritten to the shape an exported N-epoch-old
+//     chain has. The geometry: the single epoch-config version effective at
+//     epoch 1 from height 1, the open epoch N, that first block's participation
+//     credited to N, the slot and its policy in force since height 1, the mining
+//     cursor one epoch behind N, a settlement clock that ticked once per block
+//     since height 1. And, at the settled horizons, the LEDGER: for every epoch
+//     1..N-1 the finalized-epoch record consensus would have written, the
+//     entitlement it created, the settlement that was materialized for it and
+//     the anchor that dated it — each in the state a healthy operator leaves it
+//     in, entitlement released in full and settlement finalized — with the
+//     emission those epochs minted actually minted and paid out through the
+//     bank, so cumulative emission, escrow, liability and supply agree exactly
+//     as the six rewards invariants require. Every seeded row has the shape and
+//     values the block path produces for the epochs it then produces for real,
+//     which is what the fidelity comparison in the pull request checks.
 //  3. Several whole epochs are then produced through the real BeginBlock,
 //     EndBlock, epoch finalization, entitlement creation, settlement
 //     materialization and configuration promotion, from a state the block path
 //     itself verifies on every block: the open epoch's anchor is checked against
-//     the canonical history before any boundary decision, so a re-anchoring the
-//     chain would not accept is a halted block, not a passed test.
+//     the canonical history before any boundary decision, so a rewrite the chain
+//     would not accept is a halted block, not a passed test.
 //
-// The result is a head thousands of epochs from its only version anchor, which is
-// precisely the geometry #182 needed and no other fixture had. Its recent history
-// is real; its distant past is empty, and the harness treats "no record of epoch
-// 1" as the honest answer it is.
+// The result is a head thousands of epochs from its only version anchor with a
+// full history behind it, which is the geometry #182 needed and no other fixture
+// had. A third horizon at 2^32+1 epochs carries no seeded ledger — four billion
+// rows are not a fixture — and exists to catch a cap counted in epochs that reads
+// nothing at all; its distant past is empty, and the harness treats "no record of
+// epoch 1" as the honest answer it is there.
 //
 // # What a passing run proves
 //
-// Every served query answers at the head. The store work of asking about the head
-// epoch is the same as asking about an epoch next to the anchor, and the same at
-// 3000 epochs as at 10 000, so a walk proportional to chain age is caught by
-// arithmetic rather than by a timer — the timer is there too, generously, as a
-// second line. Both are asserted on the real gRPC path with the real height
-// header, exactly as a remote consumer reaches the handler.
+// Every served query answers at every head. The store work of every successful
+// query at 3000 epochs is the store work at 10 000, within a few bytes of varint
+// drift, and a boundary at the head costs what a boundary next to the anchor
+// costs; so a read path that visits records in proportion to chain age, or that
+// reads even one extra record per thousand epochs, is caught by arithmetic. A
+// generous timer stands behind it. What the gas rule does NOT catch is a walk
+// bounded by a constant — a fixed five-seek lookup costs the same on every chain
+// — and that is out of scope here, because such a walk does not fail with age.
+// Nor can this fixture age a cost that grows with the number of OPEN
+// settlements: its seeded history is settled, so it always holds three, which
+// is what a healthy chain holds too. Both are asserted on the real gRPC path
+// with the real height header, exactly as a remote consumer reaches the handler.
 
 // agedEpochsDriven is how many whole epochs are produced for real after the
-// re-anchoring, so the head has real finalized epochs, entitlements and
-// settlements behind it.
+// rewrite, so the head has consensus-made finalized epochs, entitlements and
+// settlements behind it whichever horizon it is at.
 const agedEpochsDriven = 3
 
-// horizons are the chain ages the harness runs at, as the epoch open at the
-// re-anchoring. The live testnet's 360-block, five-second epochs make the first
-// about two months of chain life and the second about seven; #182 struck at
-// epoch 1000, three weeks in.
-var horizons = []uint64{3_001, 10_001}
+// horizon is one chain age the harness runs at.
+type horizon struct {
+	// openEpoch is the epoch open at the rewrite.
+	openEpoch uint64
+	// settled seeds the closed-and-settled ledger for epochs 1..openEpoch-1.
+	settled bool
+}
+
+// horizons are the chain ages the harness runs at. The live testnet's 360-block,
+// five-second epochs make the first about two months of chain life and the
+// second about seven; #182 struck at epoch 1000, three weeks in. The third is
+// past any cap a uint32 could hold.
+var horizons = []horizon{{3_001, true}, {10_001, true}, {1<<32 + 1, false}}
 
 // agedChain is a pinnedChain whose head is thousands of epochs from genesis.
 type agedChain struct {
 	*pinnedChain
+	settled bool
 	// headEpoch is the epoch open at the head.
 	headEpoch uint64
 	// headEpochStart is the canonical first height of headEpoch.
 	headEpochStart uint64
+	// epochEmission is what every closed epoch of this chain minted: the whole
+	// history stays inside the first halving tier, and every block was
+	// reward-enabled, so each epoch emitted the full subsidy for its length.
+	epochEmission sdkmath.Int
 }
 
 // bootAgedChain produces a chain whose open epoch at the head is
 // openEpoch+agedEpochsDriven, aged as described in the file header.
-func bootAgedChain(t *testing.T, openEpoch uint64) *agedChain {
+func bootAgedChain(t *testing.T, h horizon) *agedChain {
 	t.Helper()
-	require.Greater(t, openEpoch, uint64(1), "an aged chain is one that has left epoch 1")
+	require.Greater(t, h.openEpoch, uint64(1), "an aged chain is one that has left epoch 1")
 
 	length := uint64(epochLength)
 	// The first height of openEpoch on a chain born at height 1 with this epoch
 	// length and no geometry change since: the recurrence EpochStartHeight uses.
-	openStart := 1 + (openEpoch-1)*length
+	openStart := 1 + (h.openEpoch-1)*length
 	chain := bootPinnedChainAt(t, int64(openStart))
 	chain.commitThrough(t, int64(openStart))
 
-	// Re-anchor the committed state. Writes through a head context are committed
+	// Rewrite the committed state. Writes through a head context are committed
 	// by the next block, and that block's BeginBlock verifies the open epoch
 	// against the canonical history before it does anything else.
 	ctx := chain.headContext()
 	rewards := chain.app.RewardsKeeper
+	mining := chain.app.MiningKeeper
+	coreslot := chain.app.CoreSlotKeeper
 
-	state, err := rewards.GetState(ctx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), state.CurrentEpoch)
-	require.Equal(t, openStart, state.CurrentEpochStartHeight)
-	state.CurrentEpoch = openEpoch
-	require.NoError(t, rewards.SetState(ctx, state))
-
+	// --- geometry -------------------------------------------------------------
 	anchor, err := rewards.EpochConfigVersions.Get(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, openStart, anchor.EffectiveStartHeight)
@@ -148,20 +181,175 @@ func bootAgedChain(t *testing.T, openEpoch uint64) *agedChain {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), credited)
 	require.NoError(t, rewards.ActiveBlocks.Remove(ctx, collections.Join(uint64(1), uint64(1))))
-	require.NoError(t, rewards.SetActiveBlocks(ctx, openEpoch, 1, credited))
+	require.NoError(t, rewards.SetActiveBlocks(ctx, h.openEpoch, 1, credited))
 
-	mining := chain.app.MiningKeeper
-	require.NoError(t, mining.LastProcessedRewardEpoch.Set(ctx, openEpoch-1))
+	require.NoError(t, mining.LastProcessedRewardEpoch.Set(ctx, h.openEpoch-1))
 	// Every block since height 1 was release-enabled, so the clock is the height.
 	require.NoError(t, mining.SettlementClock.Set(ctx, openStart))
 
+	// The slot and its policy have been in force since the chain's first block,
+	// as a genesis slot's are. The policy seek index is keyed by the height a
+	// version starts at, so its entry moves with the version.
+	slot, err := coreslot.Slots.Get(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(openStart), slot.ActivatedHeight)
+	slot.ActivatedHeight, slot.ActivationEffectiveHeight = 1, 1
+	require.NoError(t, coreslot.Slots.Set(ctx, 1, slot))
+	policy, err := coreslot.SelectionPolicies.Get(ctx, collections.Join(uint64(1), uint64(1)))
+	require.NoError(t, err)
+	require.Equal(t, int64(openStart), policy.ValidFromHeight)
+	policy.ValidFromHeight = 1
+	require.NoError(t, coreslot.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(1)), policy))
+	require.NoError(t, coreslot.PolicyStarts.Remove(ctx, collections.Join(uint64(1), int64(openStart))))
+	require.NoError(t, coreslot.PolicyStarts.Set(ctx, collections.Join(uint64(1), int64(1)), policy.PolicyVersion))
+
+	// --- ledger ---------------------------------------------------------------
+	params, err := rewards.GetParams(ctx)
+	require.NoError(t, err)
+	maxSupply, ok := sdkmath.NewIntFromString(params.MaxSupply)
+	require.True(t, ok)
+	subsidy, ok := sdkmath.NewIntFromString(params.InitialBlockSubsidy)
+	require.True(t, ok)
+	epochEmission, _, err := rewardskeeper.ComputeEpochEmission(
+		sdkmath.ZeroInt(), length, maxSupply, subsidy, params.HalvingMode)
+	require.NoError(t, err)
+	require.True(t, epochEmission.IsPositive())
+
+	state, err := rewards.GetState(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), state.CurrentEpoch)
+	require.Equal(t, openStart, state.CurrentEpochStartHeight)
+	state.CurrentEpoch = h.openEpoch
+	if h.settled {
+		state.CumulativeEmitted = seedSettledHistory(t, ctx, chain, h.openEpoch, epochEmission).String()
+	}
+	require.NoError(t, rewards.SetState(ctx, state))
+
 	chain.commitThrough(t, chain.head+agedEpochsDriven*epochLength+5)
 
-	headEpoch := openEpoch + agedEpochsDriven
-	return &agedChain{
+	headEpoch := h.openEpoch + agedEpochsDriven
+	aged := &agedChain{
 		pinnedChain:    chain,
+		settled:        h.settled,
 		headEpoch:      headEpoch,
 		headEpochStart: 1 + (headEpoch-1)*length,
+		epochEmission:  epochEmission,
+	}
+	assertAllRewardsInvariants(t, chain.app, chain.headContext())
+	return aged
+}
+
+// seedSettledHistory writes the closed-and-settled ledger for epochs 1..openEpoch-1
+// and returns the cumulative emission those epochs minted.
+//
+// Each epoch is left as a healthy operator leaves it: emission minted, the
+// entitlement created and then released in full through the bank to the payout
+// address, the settlement materialized, distributed in one chunk and finalized by
+// its operator. The ledger therefore carries no outstanding liability from these
+// epochs, and the escrow holds nothing for them, exactly as it would after
+// release. The whole history stays in the first halving tier, which is what makes
+// every epoch's emission the same closed-form number the block path computes for
+// the epochs produced afterwards; the tier is asserted rather than assumed.
+func seedSettledHistory(
+	t *testing.T, ctx sdk.Context, chain *pinnedChain, openEpoch uint64, epochEmission sdkmath.Int,
+) sdkmath.Int {
+	t.Helper()
+	rewards := chain.app.RewardsKeeper
+	mining := chain.app.MiningKeeper
+	length := uint64(epochLength)
+	closed := openEpoch - 1
+	cumulative := epochEmission.MulRaw(int64(closed))
+
+	params, err := rewards.GetParams(ctx)
+	require.NoError(t, err)
+	maxSupply, ok := sdkmath.NewIntFromString(params.MaxSupply)
+	require.True(t, ok)
+	tier, err := rewardskeeper.HalvingTier(cumulative, maxSupply)
+	require.NoError(t, err)
+	require.Zero(t, tier, "the seeded history must stay inside the first halving tier for its emission to be the closed form")
+
+	cfg, err := rewards.GetCurrentEpochConfig(ctx)
+	require.NoError(t, err)
+
+	// The value those epochs minted and paid out. Minted by the rewards module,
+	// which is the only minter, and released to the payout snapshot the way every
+	// entitlement is released: out of escrow, through the bank.
+	coins := sdk.NewCoins(sdk.NewCoin(params.NativeDenom, cumulative))
+	require.NoError(t, chain.app.BankKeeper.MintCoins(ctx, rewardstypes.ModuleName, coins))
+	require.NoError(t, chain.app.BankKeeper.SendCoinsFromModuleToAccount(
+		ctx, rewardstypes.ModuleName, mustAddr(t, chain.payout), coins))
+
+	for epoch := uint64(1); epoch <= closed; epoch++ {
+		start := 1 + (epoch-1)*length
+		end := epoch * length
+		cfgCopy := cfg
+		require.NoError(t, rewards.SetFinalizedEpoch(ctx, rewardstypes.EpochReward{
+			EpochNumber:                 epoch,
+			StartHeight:                 start,
+			EndHeight:                   end,
+			MintedEmission:              epochEmission.String(),
+			CarryIn:                     "0",
+			DistributableFees:           "0",
+			TreasuryAmount:              "0",
+			RewardPool:                  epochEmission.String(),
+			AllocatedAmount:             epochEmission.String(),
+			CarryOut:                    "0",
+			DistributionMethod:          cfg.DistributionMethod,
+			RemainderPolicy:             cfg.RemainderPolicy,
+			CumulativeEmittedAfterEpoch: epochEmission.MulRaw(int64(epoch)).String(),
+			Config:                      &cfgCopy,
+			RewardEnabledBlocks:         length,
+		}))
+		require.NoError(t, rewards.SlotEntitlements.Set(ctx, collections.Join(epoch, uint64(1)),
+			rewardstypes.SlotEntitlement{
+				SlotId:                         1,
+				Epoch:                          epoch,
+				TotalBlocksActive:              length,
+				EntitlementAmount:              epochEmission.String(),
+				ReleasedAmount:                 epochEmission.String(),
+				PayoutAddress:                  chain.payout,
+				RewardConfigVersion:            1,
+				SlotStatusAtEpochClose:         coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
+				ActivationSequenceAtEpochClose: 1,
+				CreatedHeight:                  end,
+			}))
+		// Materialized in the closing block's EndBlock, after the clock ticked, so
+		// the anchor is the closing height; one chunk carried the distribution and
+		// the operator finalized in the block after it.
+		require.NoError(t, mining.SettlementEpochAnchors.Set(ctx, epoch,
+			miningtypes.SettlementEpochAnchor{Epoch: epoch, CreatedSettlementClock: end}))
+		require.NoError(t, mining.Settlements.Set(ctx, collections.Join(uint64(1), epoch),
+			miningtypes.Settlement{
+				SlotId:                  1,
+				Epoch:                   epoch,
+				DistributionModeVersion: 1,
+				SettlementMode:          miningtypes.SettlementMode_SETTLEMENT_MODE_TRUSTED_AS,
+				SettlementParamsVersion: 1,
+				NextChunkIndex:          1,
+				Finalized:               true,
+				FinalizedHeight:         end + 2,
+				FinalizationReason:      miningtypes.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY,
+			}))
+	}
+	return cumulative
+}
+
+// assertAllRewardsInvariants runs every rewards invariant, including the
+// full-scan liability check the block-path helper skips, against real bank and
+// module state.
+func assertAllRewardsInvariants(t *testing.T, a *app.App, ctx sdk.Context) {
+	t.Helper()
+	k := a.RewardsKeeper
+	for name, invariant := range map[string]func(sdk.Context) (string, bool){
+		"supply-cap":                k.SupplyCapInvariant(),
+		"cumulative-emitted":        k.CumulativeEmittedInvariant(),
+		"module-balance-coverage":   k.ModuleBalanceCoverageInvariant(),
+		"entitlement-liability":     k.EntitlementLiabilityInvariant(),
+		"denom-correctness":         k.DenomCorrectnessInvariant(),
+		"closed-epoch-immutability": k.ClosedEpochImmutabilityInvariant(),
+	} {
+		msg, broken := invariant(ctx)
+		require.Falsef(t, broken, "invariant %s broken: %s", name, msg)
 	}
 }
 
@@ -171,9 +359,10 @@ type horizonCase struct {
 	method string
 	req    protoMessage
 	// absent lists the codes that are an honest answer for this question besides
-	// success. It is only ever NotFound: an aged chain has no record of its
-	// distant past and no record of its future, and saying so is the contract.
-	// Internal and Unknown are refused for every case regardless.
+	// success. It is only ever NotFound, and only for a record the chain
+	// genuinely never wrote: nothing about its future, and — at the unsettled
+	// horizon alone — nothing about its distant past. Internal and Unknown are
+	// refused for every case regardless.
 	absent []codes.Code
 	// verify inspects a successful reply.
 	verify func(t *testing.T, reply any)
@@ -181,10 +370,20 @@ type horizonCase struct {
 
 var notFound = []codes.Code{codes.NotFound}
 
+// pastRecord is the contract for a record of epoch 1: it exists at a settled
+// horizon and must be served; it was never written at the unsettled one.
+func (c *agedChain) pastRecord() []codes.Code {
+	if c.settled {
+		return nil
+	}
+	return notFound
+}
+
 func (c *agedChain) horizonCases() []horizonCase {
 	head := c.headEpoch
 	previous := head - 1
 	length := uint64(epochLength)
+	emission := c.epochEmission.String()
 
 	return []horizonCase{
 		// --- x/rewards -----------------------------------------------------
@@ -198,6 +397,8 @@ func (c *agedChain) horizonCases() []horizonCase {
 				require.Equal(t, c.headEpochStart, info.CurrentEpochStartHeight)
 				require.Equal(t, c.headEpochStart+length-1, info.CurrentEpochEndHeight)
 				require.Equal(t, length, info.CurrentEpochLengthBlocks)
+				require.Equal(t, c.expectedCumulativeEmitted().String(), info.State.CumulativeEmitted,
+					"the ledger reflects every closed epoch, seeded and produced")
 			}},
 		{name: "rewards next halving", method: "/twilight.rewards.v1.Query/NextHalving",
 			req: &rewardstypes.QueryNextHalvingRequest{}},
@@ -209,13 +410,28 @@ func (c *agedChain) horizonCases() []horizonCase {
 				require.Equal(t, c.headEpochStart-length, epoch.StartHeight)
 				require.Equal(t, c.headEpochStart-1, epoch.EndHeight)
 				require.Equal(t, length, epoch.RewardEnabledBlocks)
+				require.Equal(t, emission, epoch.MintedEmission)
+				require.Equal(t, c.expectedCumulativeEmitted().String(), epoch.CumulativeEmittedAfterEpoch,
+					"the last closed epoch's running total is the ledger's")
 			}},
 		{name: "rewards epoch reward, epoch 1", method: "/twilight.rewards.v1.Query/EpochReward",
-			req: &rewardstypes.QueryEpochRewardRequest{EpochNumber: 1}, absent: notFound},
+			req: &rewardstypes.QueryEpochRewardRequest{EpochNumber: 1}, absent: c.pastRecord(),
+			verify: func(t *testing.T, reply any) {
+				epoch := reply.(*rewardstypes.QueryEpochRewardResponse).EpochReward
+				require.Equal(t, uint64(1), epoch.EpochNumber)
+				require.Equal(t, uint64(1), epoch.StartHeight)
+				require.Equal(t, length, epoch.EndHeight)
+				require.Equal(t, emission, epoch.MintedEmission)
+				require.Equal(t, emission, epoch.CumulativeEmittedAfterEpoch)
+			}},
 		{name: "rewards epoch reward, next epoch", method: "/twilight.rewards.v1.Query/EpochReward",
 			req: &rewardstypes.QueryEpochRewardRequest{EpochNumber: head + 1}, absent: notFound},
 		{name: "rewards cumulative emitted", method: "/twilight.rewards.v1.Query/CumulativeEmitted",
-			req: &rewardstypes.QueryCumulativeEmittedRequest{}},
+			req: &rewardstypes.QueryCumulativeEmittedRequest{},
+			verify: func(t *testing.T, reply any) {
+				require.Equal(t, c.expectedCumulativeEmitted().String(),
+					reply.(*rewardstypes.QueryCumulativeEmittedResponse).CumulativeEmitted)
+			}},
 		{name: "rewards supply schedule", method: "/twilight.rewards.v1.Query/SupplySchedule",
 			req: &rewardstypes.QuerySupplyScheduleRequest{}},
 		{name: "rewards current epoch active blocks", method: "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
@@ -227,7 +443,15 @@ func (c *agedChain) horizonCases() []horizonCase {
 				require.Equal(t, uint64(1), active.ActiveBlocks[0].SlotId)
 			}},
 		{name: "rewards module balances", method: "/twilight.rewards.v1.Query/ModuleBalances",
-			req: &rewardstypes.QueryModuleBalancesRequest{}},
+			req: &rewardstypes.QueryModuleBalancesRequest{},
+			verify: func(t *testing.T, reply any) {
+				balances := reply.(*rewardstypes.QueryModuleBalancesResponse)
+				// The produced epochs are unsettled, the seeded ones released: the
+				// escrow holds exactly the produced epochs' entitlements.
+				owed := c.epochEmission.MulRaw(agedEpochsDriven).String()
+				require.Equal(t, owed, balances.OutstandingEntitlementLiability)
+				require.Equal(t, owed, balances.RewardsBalance)
+			}},
 		{name: "rewards epoch config versions", method: "/twilight.rewards.v1.Query/EpochConfigVersions",
 			req: &rewardstypes.QueryEpochConfigVersionsRequest{},
 			verify: func(t *testing.T, reply any) {
@@ -255,9 +479,17 @@ func (c *agedChain) horizonCases() []horizonCase {
 				require.Equal(t, previous, entitlement.Epoch)
 				require.Equal(t, uint64(1), entitlement.SlotId)
 				require.Equal(t, c.payout, entitlement.PayoutAddress)
+				require.Equal(t, emission, entitlement.EntitlementAmount)
+				require.Equal(t, "0", entitlement.ReleasedAmount)
 			}},
 		{name: "rewards slot entitlement, epoch 1", method: "/twilight.rewards.v1.Query/SlotEntitlement",
-			req: &rewardstypes.QuerySlotEntitlementRequest{SlotId: 1, Epoch: 1}, absent: notFound},
+			req: &rewardstypes.QuerySlotEntitlementRequest{SlotId: 1, Epoch: 1}, absent: c.pastRecord(),
+			verify: func(t *testing.T, reply any) {
+				entitlement := reply.(*rewardstypes.QuerySlotEntitlementResponse).Entitlement
+				require.Equal(t, uint64(1), entitlement.Epoch)
+				require.Equal(t, emission, entitlement.EntitlementAmount)
+				require.Equal(t, emission, entitlement.ReleasedAmount, "released in full, long ago")
+			}},
 		{name: "rewards slot entitlement, next epoch", method: "/twilight.rewards.v1.Query/SlotEntitlement",
 			req: &rewardstypes.QuerySlotEntitlementRequest{SlotId: 1, Epoch: head + 1}, absent: notFound},
 		{name: "rewards entitlements by epoch, previous epoch", method: "/twilight.rewards.v1.Query/SlotEntitlementsByEpoch",
@@ -268,7 +500,13 @@ func (c *agedChain) horizonCases() []horizonCase {
 		{name: "rewards entitlements by epoch, epoch 1", method: "/twilight.rewards.v1.Query/SlotEntitlementsByEpoch",
 			req: &rewardstypes.QuerySlotEntitlementsByEpochRequest{Epoch: 1},
 			verify: func(t *testing.T, reply any) {
-				require.Empty(t, reply.(*rewardstypes.QuerySlotEntitlementsByEpochResponse).Entitlements)
+				entitlements := reply.(*rewardstypes.QuerySlotEntitlementsByEpochResponse).Entitlements
+				if c.settled {
+					require.Len(t, entitlements, 1)
+					require.Equal(t, emission, entitlements[0].ReleasedAmount)
+				} else {
+					require.Empty(t, entitlements)
+				}
 			}},
 		{name: "rewards entitlements by epoch, next epoch", method: "/twilight.rewards.v1.Query/SlotEntitlementsByEpoch",
 			req: &rewardstypes.QuerySlotEntitlementsByEpochRequest{Epoch: head + 1},
@@ -286,6 +524,7 @@ func (c *agedChain) horizonCases() []horizonCase {
 			req: &rewardstypes.QueryRewardConfigVersionRequest{Version: 1}},
 		{name: "rewards reward config version at epoch 1", method: "/twilight.rewards.v1.Query/RewardConfigVersion",
 			req: &rewardstypes.QueryRewardConfigVersionRequest{EffectiveEpoch: 1}},
+		// Nothing became effective at the open epoch; the identity lookup says so.
 		{name: "rewards reward config version at the current epoch", method: "/twilight.rewards.v1.Query/RewardConfigVersion",
 			req: &rewardstypes.QueryRewardConfigVersionRequest{EffectiveEpoch: head}, absent: notFound},
 		{name: "rewards pause state", method: "/twilight.rewards.v1.Query/RewardsPauseState",
@@ -301,18 +540,37 @@ func (c *agedChain) horizonCases() []horizonCase {
 				settlement := reply.(*miningtypes.QuerySettlementResponse)
 				require.Equal(t, previous, settlement.Settlement.Epoch)
 				require.False(t, settlement.Settlement.Finalized)
+				require.Equal(t, emission, settlement.RemainingAmount)
 				require.Equal(t, uint64(c.head), settlement.CurrentSettlementClock,
 					"every block of this chain's life was release-enabled")
 			}},
 		{name: "mining settlement, epoch 1", method: "/twilight.mining.v1.Query/Settlement",
-			req: &miningtypes.QuerySettlementRequest{SlotId: 1, Epoch: 1}, absent: notFound},
+			req: &miningtypes.QuerySettlementRequest{SlotId: 1, Epoch: 1}, absent: c.pastRecord(),
+			verify: func(t *testing.T, reply any) {
+				settlement := reply.(*miningtypes.QuerySettlementResponse)
+				require.Equal(t, uint64(1), settlement.Settlement.Epoch)
+				require.True(t, settlement.Settlement.Finalized)
+				require.Equal(t, "0", settlement.RemainingAmount)
+				require.False(t, settlement.PermissionlessFinalizationNow, "there is nothing left to finalize")
+				require.Equal(t, length, settlement.CreatedSettlementClock, "anchored at the closing block of epoch 1")
+			}},
 		{name: "mining settlement, next epoch", method: "/twilight.mining.v1.Query/Settlement",
 			req: &miningtypes.QuerySettlementRequest{SlotId: 1, Epoch: head + 1}, absent: notFound},
-		{name: "mining open settlements", method: "/twilight.mining.v1.Query/OpenSettlements",
+		{name: "mining open settlements, first page", method: "/twilight.mining.v1.Query/OpenSettlements",
 			req: &miningtypes.QueryOpenSettlementsRequest{SlotId: 1},
 			verify: func(t *testing.T, reply any) {
-				open := reply.(*miningtypes.QueryOpenSettlementsResponse)
-				require.Len(t, open.Settlements, agedEpochsDriven, "one open settlement per epoch closed for real")
+				page := reply.(*miningtypes.QueryOpenSettlementsResponse)
+				if c.settled {
+					// The budget is on rows INSPECTED, and the first hundred rows of a
+					// settled history are finalized. That the page comes back empty
+					// with a cursor is the documented contract, not a defect; the
+					// cursor walk below proves the open ones are reachable.
+					require.Empty(t, page.Settlements)
+					require.NotEmpty(t, page.Pagination.NextKey, "a settled history continues past the first page")
+				} else {
+					require.Len(t, page.Settlements, agedEpochsDriven, "one open settlement per epoch produced for real")
+					require.Empty(t, page.Pagination.NextKey)
+				}
 			}},
 		{name: "mining settlement clock", method: "/twilight.mining.v1.Query/SettlementClock",
 			req: &miningtypes.QuerySettlementClockRequest{},
@@ -321,6 +579,7 @@ func (c *agedChain) horizonCases() []horizonCase {
 			}},
 		{name: "mining distribution mode version 1", method: "/twilight.mining.v1.Query/DistributionModeVersion",
 			req: &miningtypes.QueryDistributionModeVersionRequest{Version: 1}},
+		// No second version was ever promoted; the exact lookup says so.
 		{name: "mining distribution mode version 2", method: "/twilight.mining.v1.Query/DistributionModeVersion",
 			req: &miningtypes.QueryDistributionModeVersionRequest{Version: 2}, absent: notFound},
 		{name: "mining distribution mode versions", method: "/twilight.mining.v1.Query/DistributionModeVersions",
@@ -356,7 +615,7 @@ func (c *agedChain) horizonCases() []horizonCase {
 			req: &miningtypes.QueryTargetEpochInterpretationRequest{TargetEpoch: 1}},
 		{name: "mining target epoch interpretation, next epoch", method: "/twilight.mining.v1.Query/TargetEpochInterpretation",
 			req: &miningtypes.QueryTargetEpochInterpretationRequest{TargetEpoch: head + 1}},
-		{name: "mining economic address", method: "/twilight.mining.v1.Query/ValidateEconomicAddress",
+		{name: "mining economic address", method: economicAddress,
 			req: &miningtypes.QueryValidateEconomicAddressRequest{Address: c.payout},
 			verify: func(t *testing.T, reply any) {
 				require.True(t, reply.(*miningtypes.QueryValidateEconomicAddressResponse).Admissible)
@@ -368,7 +627,9 @@ func (c *agedChain) horizonCases() []horizonCase {
 		{name: "coreslot slot", method: "/twilight.coreslot.v1.Query/CoreSlot",
 			req: &coreslottypes.QueryCoreSlotRequest{SlotId: 1},
 			verify: func(t *testing.T, reply any) {
-				require.Equal(t, c.credential, reply.(*coreslottypes.QueryCoreSlotResponse).Slot.SettlementAddress)
+				slot := reply.(*coreslottypes.QueryCoreSlotResponse).Slot
+				require.Equal(t, c.credential, slot.SettlementAddress)
+				require.Equal(t, int64(1), slot.ActivatedHeight, "a genesis slot, active since the first block")
 			}},
 		{name: "coreslot slots", method: "/twilight.coreslot.v1.Query/CoreSlots",
 			req: &coreslottypes.QueryCoreSlotsRequest{},
@@ -401,13 +662,23 @@ func (c *agedChain) horizonCases() []horizonCase {
 		{name: "coreslot selection policy version 1", method: "/twilight.coreslot.v1.Query/SelectionPolicyVersion",
 			req: &coreslottypes.QuerySelectionPolicyVersionRequest{SlotId: 1, PolicyVersion: 1}},
 		{name: "coreslot selection policy at the head", method: "/twilight.coreslot.v1.Query/SelectionPolicyAtHeight",
-			req: &coreslottypes.QuerySelectionPolicyAtHeightRequest{SlotId: 1, AtHeight: c.head}},
-		// The slot was admitted at the height the fixture booted at, which is an
-		// ordinary thing for a slot on an old chain to have been; before that
-		// height it had no policy, and that too is an honest answer.
+			req:    &coreslottypes.QuerySelectionPolicyAtHeightRequest{SlotId: 1, AtHeight: c.head},
+			verify: c.verifyGenesisPolicy},
 		{name: "coreslot selection policy at height 1", method: "/twilight.coreslot.v1.Query/SelectionPolicyAtHeight",
-			req: &coreslottypes.QuerySelectionPolicyAtHeightRequest{SlotId: 1, AtHeight: 1}, absent: notFound},
+			req:    &coreslottypes.QuerySelectionPolicyAtHeightRequest{SlotId: 1, AtHeight: 1},
+			verify: c.verifyGenesisPolicy},
 	}
+}
+
+// expectedCumulativeEmitted is what every closed epoch minted, seeded and
+// produced: at a settled horizon that is one emission per epoch before the head;
+// at the unsettled one, only the produced epochs.
+func (c *agedChain) expectedCumulativeEmitted() sdkmath.Int {
+	closed := int64(agedEpochsDriven)
+	if c.settled {
+		closed = int64(c.headEpoch - 1)
+	}
+	return c.epochEmission.MulRaw(closed)
 }
 
 // verifyBoundaries checks a boundary reply against the recurrence a chain with
@@ -423,6 +694,14 @@ func (c *agedChain) verifyBoundaries(epoch uint64) func(t *testing.T, reply any)
 	}
 }
 
+// verifyGenesisPolicy checks that the policy resolved at a height is the one the
+// slot has had since the chain's first block.
+func (c *agedChain) verifyGenesisPolicy(t *testing.T, reply any) {
+	policy := reply.(*coreslottypes.QuerySelectionPolicyResponse).Policy
+	require.Equal(t, uint64(1), policy.PolicyVersion)
+	require.Equal(t, int64(1), policy.ValidFromHeight)
+}
+
 // call sends one request through the gRPC registration path with the height
 // header set, and returns whatever the handler returned.
 func (q *headerQuerier) call(t *testing.T, method string, req protoMessage, height int64) (any, error) {
@@ -435,15 +714,31 @@ func (q *headerQuerier) call(t *testing.T, method string, req protoMessage, heig
 		func(arg any) error { return arg.(protoMessage).Unmarshal(data) }, nil)
 }
 
-// servedQueryMethods lists every query method the app registers for the three
-// custom modules, from the registration itself rather than from any list kept
-// beside it.
-func servedQueryMethods(q *headerQuerier) []string {
+// servedTwilightMethods lists every method the app registers under a twilight
+// service, from the registration itself rather than from any list kept beside it.
+func servedTwilightMethods(q *headerQuerier) []string {
 	var methods []string
 	for method := range q.methods {
-		if strings.HasPrefix(method, "/twilight.") && strings.Contains(method, ".Query/") {
+		if strings.HasPrefix(method, "/twilight.") {
 			methods = append(methods, method)
 		}
+	}
+	sort.Strings(methods)
+	return methods
+}
+
+// declaredQueryMethods lists every method the three modules' generated query
+// service descriptors declare. It is the other half of the enumeration check:
+// the served set must be exactly this, so a fourth module, or a query service
+// under another name, cannot be served without appearing here.
+func declaredQueryMethods() []string {
+	probe := &headerQuerier{methods: map[string]grpc.MethodDesc{}, handlers: map[string]any{}}
+	rewardstypes.RegisterQueryServer(probe, nil)
+	miningtypes.RegisterQueryServer(probe, nil)
+	coreslottypes.RegisterQueryServer(probe, nil)
+	var methods []string
+	for method := range probe.methods {
+		methods = append(methods, method)
 	}
 	sort.Strings(methods)
 	return methods
@@ -481,7 +776,6 @@ func measureQuery(t *testing.T, a *app.App, method string, req protoMessage, hei
 		require.Zerof(t, res.Code, "%s failed: %s", method, res.Log)
 
 		gas := ctx.GasMeter().GasConsumed()
-		require.Positive(t, gas, "a query that read nothing answered from nothing")
 		if run == 0 {
 			best.gas = gas
 		}
@@ -493,47 +787,86 @@ func measureQuery(t *testing.T, a *app.App, method string, req protoMessage, hei
 	return best
 }
 
-// queryClockBound is the wall-clock ceiling for one boundary or epoch-info query
-// at the head. Deliberately generous — the real queries take microseconds — so
-// only a walk over the chain's life could reach it, and so CI noise cannot.
+// queryClockBound is the wall-clock ceiling for one query at the head.
+// Deliberately generous — the real queries take microseconds — so only a walk
+// over the chain's life could reach it, and so CI noise cannot.
 const queryClockBound = 50 * time.Millisecond
+
+// storeWorkDrift is how much the gas of one query may differ between two chain
+// ages before the difference is read as extra store work.
+//
+// Gas is metered per record read (1000 flat), per iterator step (30 flat) and per
+// byte read (3). The bytes differ a little with age on their own: a height in the
+// millions is one varint byte longer than one in the thousands, and a reply that
+// reads a handful of height-bearing records drifts by a handful of bytes. Sixty
+// gas is twenty such bytes. It is less than two iterator steps and a sixteenth
+// of one point read, so a walk that visits records in proportion to chain age —
+// or even one extra record per thousand epochs — cannot hide inside it. A walk
+// bounded by a constant, which costs the same at every age, is not what this
+// detects and is not what fails with age.
+const storeWorkDrift = 60
+
+// requireSameStoreWork asserts two queries read the same records.
+func requireSameStoreWork(t *testing.T, want, got uint64, msg string, args ...any) {
+	t.Helper()
+	var difference uint64
+	if got > want {
+		difference = got - want
+	} else {
+		difference = want - got
+	}
+	require.LessOrEqualf(t, difference, uint64(storeWorkDrift), msg+" (%d gas against %d)", append(args, got, want)...)
+	// The constant above is only meaningful while it stays well under one read.
+	require.Less(t, uint64(storeWorkDrift), storetypes.KVGasConfig().ReadCostFlat/10)
+}
+
+// horizonCosts is the store work of every successful case at one head, by case.
+type horizonCosts map[string]queryCost
 
 // TestEveryQueryAnswersAtALongHorizon is the harness.
 //
-// It runs once per horizon, and the costs of the two age-sensitive queries are
-// carried across the runs so the last assertion can say the thing that matters:
-// a chain three times older did exactly the same work.
+// It runs once per horizon, and the cost of every successful case is carried
+// across the runs so the last assertions can say the thing that matters: a chain
+// three times older did exactly the same work, query by query.
 func TestEveryQueryAnswersAtALongHorizon(t *testing.T) {
-	type ageSensitive struct{ boundaries, info queryCost }
-	costs := map[uint64]ageSensitive{}
+	costs := map[uint64]horizonCosts{}
 
-	for _, horizon := range horizons {
-		t.Run(fmt.Sprintf("open_epoch_%d", horizon), func(t *testing.T) {
-			chain := bootAgedChain(t, horizon)
-			assertInvariants(t, chain.app, chain.headContext())
+	runHorizon := func(h horizon) {
+		t.Run(fmt.Sprintf("open_epoch_%d", h.openEpoch), func(t *testing.T) {
+			started := time.Now()
+			chain := bootAgedChain(t, h)
+			t.Logf("aged to epoch %d at height %d in %s (settled history: %v)",
+				chain.headEpoch, chain.head, time.Since(started).Round(time.Millisecond), h.settled)
 			querier := newHeaderQuerier(chain.app)
 
-			// Every served method is in the table, and every table entry is served.
-			// A query added to a module without a case here fails the run.
+			// Every declared query is served, every served twilight method is in
+			// the table, and every table entry is served. A query added to a module
+			// without a case here fails the run; so does a service the filter
+			// would otherwise not know to look for.
 			cases := chain.horizonCases()
 			covered := map[string]bool{}
 			for _, testCase := range cases {
 				covered[testCase.method] = true
 			}
-			for _, method := range servedQueryMethods(querier) {
+			served := servedTwilightMethods(querier)
+			require.Equal(t, declaredQueryMethods(), served,
+				"the app serves exactly the query methods the three modules declare")
+			for _, method := range served {
 				require.Truef(t, covered[method],
 					"%s is served but has no long-horizon case; every query must be asked at the head", method)
 			}
 			for method := range covered {
-				_, served := querier.methods[method]
-				require.Truef(t, served, "%s has a case but is not served", method)
+				_, isServed := querier.methods[method]
+				require.Truef(t, isServed, "%s has a case but is not served", method)
 			}
 
 			// Asked twice: with no height, as a consumer asking about now does, and
-			// pinned to the head, as a reconciling worker does. The two must agree
-			// on the code and both must stay inside the contract.
+			// pinned to the head, as a reconciling worker does. The head is the
+			// latest height, so the two must return byte-identical answers.
+			succeeded := map[string]bool{}
 			for _, testCase := range cases {
 				t.Run(testCase.name, func(t *testing.T) {
+					var answers [][]byte
 					for _, height := range []int64{0, chain.head} {
 						reply, err := querier.call(t, testCase.method, testCase.req, height)
 						if err == nil {
@@ -541,6 +874,9 @@ func TestEveryQueryAnswersAtALongHorizon(t *testing.T) {
 							if testCase.verify != nil {
 								testCase.verify(t, reply)
 							}
+							bytes, err := reply.(protoMessage).Marshal()
+							require.NoError(t, err)
+							answers = append(answers, bytes)
 							continue
 						}
 						require.Nil(t, reply, "an error answer must carry no body")
@@ -553,54 +889,126 @@ func TestEveryQueryAnswersAtALongHorizon(t *testing.T) {
 						require.Containsf(t, testCase.absent, status.Code(),
 							"%s must succeed at the head, but answered %s: %v", testCase.name, status.Code(), err)
 					}
+					require.NotEqual(t, 1, len(answers), "no height and the pinned head must answer the same way")
+					if len(answers) == 2 {
+						require.Equal(t, answers[0], answers[1], "no height and the pinned head must give the same answer")
+						succeeded[testCase.name] = true
+					}
 				})
 			}
 
-			// The two queries #182 broke, costed at the head.
-			boundariesAtHead := measureQuery(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
-				&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: chain.headEpoch}, chain.head)
-			boundariesNearAnchor := measureQuery(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
-				&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 2}, chain.head)
-			info := measureQuery(t, chain.app, "/twilight.rewards.v1.Query/EpochInfo",
-				&rewardstypes.QueryEpochInfoRequest{}, chain.head)
+			// The open settlements are reachable by cursor, however deep the
+			// settled history in front of them.
+			chain.walkOpenSettlements(t, querier)
 
-			requireSameStoreWork(t, boundariesNearAnchor.gas, boundariesAtHead.gas,
+			// Every successful question, costed at the head.
+			atHead := horizonCosts{}
+			for _, testCase := range cases {
+				if !succeeded[testCase.name] || testCase.method == economicAddress {
+					// The address rule is process configuration and reads no state.
+					continue
+				}
+				cost := measureQuery(t, chain.app, testCase.method, testCase.req, chain.head)
+				require.Lessf(t, cost.wall, queryClockBound, "%s took %s at epoch %d", testCase.name, cost.wall, chain.headEpoch)
+				atHead[testCase.name] = cost
+			}
+			costs[h.openEpoch] = atHead
+
+			// The query #182 broke, against the same question next to the anchor.
+			nearAnchor := measureQuery(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
+				&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 2}, chain.head)
+			requireSameStoreWork(t, nearAnchor.gas, atHead["rewards epoch boundaries, current epoch"].gas,
 				"the store work of a boundary %d epochs from the anchor must be the work of one next to it; "+
 					"anything more is a walk measured from genesis", chain.headEpoch-1)
-			require.Lessf(t, boundariesAtHead.wall, queryClockBound,
-				"EpochBoundaries at epoch %d took %s", chain.headEpoch, boundariesAtHead.wall)
-			require.Lessf(t, info.wall, queryClockBound,
-				"EpochInfo at epoch %d took %s", chain.headEpoch, info.wall)
-			t.Logf("head epoch %d at height %d: EpochBoundaries %d gas in %s, EpochInfo %d gas in %s",
-				chain.headEpoch, chain.head, boundariesAtHead.gas, boundariesAtHead.wall, info.gas, info.wall)
-
-			costs[horizon] = ageSensitive{boundaries: boundariesAtHead, info: info}
+			t.Logf("head epoch %d: EpochBoundaries %d gas in %s, EpochInfo %d gas in %s",
+				chain.headEpoch,
+				atHead["rewards epoch boundaries, current epoch"].gas, atHead["rewards epoch boundaries, current epoch"].wall,
+				atHead["rewards epoch info"].gas, atHead["rewards epoch info"].wall)
 		})
 	}
 
-	require.Len(t, costs, len(horizons), "every horizon must have run to compare them")
-	youngest, oldest := costs[horizons[0]], costs[horizons[len(horizons)-1]]
-	requireSameStoreWork(t, youngest.boundaries.gas, oldest.boundaries.gas,
-		"EpochBoundaries did more store work on the older chain; its cost grows with chain age")
-	requireSameStoreWork(t, youngest.info.gas, oldest.info.gas,
-		"EpochInfo did more store work on the older chain; its cost grows with chain age")
+	// The settled horizons run and are compared FIRST. A read path that walks the
+	// chain's whole life is caught between them in about a second; run after the
+	// unsettled horizon it would still be caught, but only after four billion
+	// epochs' worth of that walk.
+	var settled []uint64
+	for _, h := range horizons {
+		if h.settled {
+			runHorizon(h)
+			settled = append(settled, h.openEpoch)
+		}
+	}
+	require.GreaterOrEqual(t, len(settled), 2, "two settled horizons are needed to compare work across age")
+	require.Len(t, costs, len(settled), "every settled horizon must have run to compare them")
+
+	// Query by query, the settled chains must have done the same work at 10 000
+	// epochs as at 3000.
+	youngest := costs[settled[0]]
+	for _, older := range settled[1:] {
+		for name, young := range youngest {
+			old, measured := costs[older][name]
+			require.Truef(t, measured, "%s was costed at open epoch %d but not at %d", name, settled[0], older)
+			requireSameStoreWork(t, young.gas, old.gas,
+				"%s did more store work at open epoch %d than at %d; its cost grows with chain age", name, older, settled[0])
+		}
+	}
+
+	// The unsettled horizon has a different history behind it, so only the
+	// questions that read no history are compared to it.
+	for _, h := range horizons {
+		if h.settled {
+			continue
+		}
+		runHorizon(h)
+		for _, name := range []string{"rewards epoch boundaries, current epoch", "rewards epoch info"} {
+			requireSameStoreWork(t, youngest[name].gas, costs[h.openEpoch][name].gas,
+				"%s did more store work at open epoch %d than at %d; its cost grows with chain age", name, h.openEpoch, settled[0])
+		}
+	}
+	require.Len(t, costs, len(horizons), "every horizon must have run")
 }
 
-// requireSameStoreWork asserts two queries read the same records.
+// walkOpenSettlements follows the OpenSettlements cursor from the first page to
+// the last and requires the open set to be exactly the epochs produced for real.
 //
-// Gas is metered per record read and per byte read, and the bytes differ a little
-// with age on their own: a height in the millions is one varint byte longer than
-// one in the thousands, and the record holding it is read either way. So the
-// two are allowed to differ by less than the flat cost of ONE read. A walk that
-// visited one more record — let alone one per epoch — cannot hide inside that.
-func requireSameStoreWork(t *testing.T, want, got uint64, msg string, args ...any) {
+// On a settled chain this is a walk over the whole settled history, one hundred
+// rows a page: the query's budget is on rows inspected, so a worker with a long
+// finalized history behind it pages through that history to reach what it still
+// owes. Each page is bounded, so the query itself does not fail with age; the
+// number of pages is what grows, and it is logged rather than bounded here because
+// it is the documented shape of the surface, not a defect this harness owns.
+func (c *agedChain) walkOpenSettlements(t *testing.T, querier *headerQuerier) {
 	t.Helper()
-	oneRead := storetypes.KVGasConfig().ReadCostFlat
-	var difference uint64
-	if got > want {
-		difference = got - want
-	} else {
-		difference = want - got
+	var open []uint64
+	var key []byte
+	pages := 0
+	for {
+		reply, err := querier.call(t, "/twilight.mining.v1.Query/OpenSettlements",
+			&miningtypes.QueryOpenSettlementsRequest{SlotId: 1, Pagination: pageAfter(key)}, c.head)
+		require.NoError(t, err)
+		page := reply.(*miningtypes.QueryOpenSettlementsResponse)
+		pages++
+		for _, settlement := range page.Settlements {
+			open = append(open, settlement.Epoch)
+		}
+		key = page.Pagination.NextKey
+		if len(key) == 0 {
+			break
+		}
+		require.Less(t, pages, int(c.headEpoch/100)+3, "the cursor walk must terminate within the history's length")
 	}
-	require.Lessf(t, difference, oneRead, msg+" (%d gas against %d)", append(args, got, want)...)
+	var produced []uint64
+	for epoch := c.headEpoch - agedEpochsDriven; epoch < c.headEpoch; epoch++ {
+		produced = append(produced, epoch)
+	}
+	require.Equal(t, produced, open, "the open settlements are exactly the produced epochs' ones")
+	t.Logf("open settlements reached after %d pages at epoch %d", pages, c.headEpoch)
+}
+
+// pageAfter continues a listing from a cursor, or starts it when there is none.
+func pageAfter(key []byte) *query.PageRequest {
+	if len(key) == 0 {
+		return nil
+	}
+	return &query.PageRequest{Key: key}
 }
