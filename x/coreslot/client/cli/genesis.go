@@ -250,14 +250,8 @@ func validateGenesisCmd() *cobra.Command {
 				return err
 			}
 			for _, list := range lists {
-				if len(expected) != len(list.validators) {
-					return fmt.Errorf("%s: CometBFT validator count %d does not match active core slots %d",
-						list.key, len(list.validators), len(expected))
-				}
-				for _, validator := range list.validators {
-					if expected[validator.PubKey.Value] != validator.Power {
-						return fmt.Errorf("%s: CometBFT validator %s does not match coreslot genesis", list.key, validator.Name)
-					}
+				if err := matchActiveSlots(list, expected); err != nil {
+					return err
 				}
 			}
 			// Reading the height is part of validating it; writing it back is not.
@@ -317,6 +311,45 @@ func statedValidatorLists(doc map[string]json.RawMessage) ([]statedValidator, er
 		return nil, err
 	}
 	return lists, nil
+}
+
+// genesisValidatorKeyType is the only consensus key type a CoreSlot genesis
+// writes, and the amino name CometBFT gives an ed25519 key in genesis JSON.
+const genesisValidatorKeyType = "tendermint/PubKeyEd25519"
+
+// matchActiveSlots holds a stated validator list to exactly the active slots:
+// the same number of entries, every entry an ed25519 key that belongs to an
+// active slot and carries that slot's power, and no key twice.
+//
+// Each of those is needed on its own. Looking the key up without `, ok` read an
+// unknown key as power "" — so a foreign key with no power matched. With the
+// count equal, a duplicate hides a missing slot ([A, A] for slots A and B). And
+// comparing only the key bytes accepted the right bytes under the wrong type.
+func matchActiveSlots(list statedValidator, expected map[string]string) error {
+	if len(expected) != len(list.validators) {
+		return fmt.Errorf("%s: CometBFT validator count %d does not match active core slots %d",
+			list.key, len(list.validators), len(expected))
+	}
+	seen := make(map[string]bool, len(list.validators))
+	for _, validator := range list.validators {
+		if validator.PubKey.Type != genesisValidatorKeyType {
+			return fmt.Errorf("%s: CometBFT validator %s has key type %q, want %q",
+				list.key, validator.Name, validator.PubKey.Type, genesisValidatorKeyType)
+		}
+		power, ok := expected[validator.PubKey.Value]
+		if !ok {
+			return fmt.Errorf("%s: CometBFT validator %s has a key that belongs to no active core slot", list.key, validator.Name)
+		}
+		if seen[validator.PubKey.Value] {
+			return fmt.Errorf("%s: CometBFT validator %s repeats a key already listed", list.key, validator.Name)
+		}
+		seen[validator.PubKey.Value] = true
+		if validator.Power != power {
+			return fmt.Errorf("%s: CometBFT validator %s does not match coreslot genesis: power %q, want %q",
+				list.key, validator.Name, validator.Power, power)
+		}
+	}
+	return nil
 }
 
 // consensusValidators extracts consensus.validators, or nothing when the
