@@ -291,8 +291,10 @@ func metadataPatchFromFlags(fs *pflag.FlagSet, positional []string) (metadataPat
 
 // validate holds the NAMED values to the limit the keeper enforces, through the
 // keeper's own validator, so a value that would be refused on-chain is refused
-// here first. Only named values are checked: everything else in the merge is a
-// value the chain already accepted.
+// before any node is reached. It is the local half of the check: the merged
+// record is validated again once the current one is read, because an unnamed
+// field can already be over the limit on-chain (genesis does not validate
+// metadata) and only the merge can see that.
 func (p metadataPatch) validate() error {
 	if err := types.ValidateMetadata(p.apply(nil)); err != nil {
 		return fmt.Errorf("metadata: %w", err)
@@ -341,6 +343,30 @@ func printMetadataPreview(w io.Writer, slotID uint64, current, merged *types.Ope
 	}
 }
 
+// metadataArgs is cobra.RangeArgs(1, 2) with an error that says what the
+// command wants, rather than "requires at least 1 arg(s)".
+func metadataArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("slot-id is required: %s [slot-id] --moniker|--identity|--website|--security-contact|--details", cmd.Name())
+	}
+	return cobra.RangeArgs(1, 2)(cmd, args)
+}
+
+// runAncestorPersistentPreRun runs what cobra would have run had the command
+// no PersistentPreRunE of its own: the nearest ancestor's, if any.
+func runAncestorPersistentPreRun(c *cobra.Command, args []string) error {
+	for p := c.Parent(); p != nil; p = p.Parent() {
+		switch {
+		case p.PersistentPreRunE != nil:
+			return p.PersistentPreRunE(c, args)
+		case p.PersistentPreRun != nil:
+			p.PersistentPreRun(c, args)
+			return nil
+		}
+	}
+	return nil
+}
+
 // updateMetadataCmd is a read-modify-write, not a plain message wrapper.
 //
 // MsgUpdateOperatorMetadata carries the whole OperatorMetadata and the keeper
@@ -354,7 +380,7 @@ func printMetadataPreview(w io.Writer, slotID uint64, current, merged *types.Ope
 // send all five fields. Changing the message to a merge is a consensus change
 // and is deferred to the v0.4.0 upgrade.
 func updateMetadataCmd() *cobra.Command {
-	cmd := txCmd("update-metadata [slot-id]", cobra.RangeArgs(1, 2), func(cmd *cobra.Command, args []string) error {
+	cmd := txCmd("update-metadata [slot-id]", metadataArgs, func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
 			return err
@@ -379,9 +405,9 @@ func updateMetadataCmd() *cobra.Command {
 			return fmt.Errorf("update-metadata reads the slot's current metadata from a node, so it cannot run with --offline")
 		}
 		// The read goes through the same generated client every query command
-		// uses, over whichever endpoint the client context has (--node or
-		// --grpc-addr), so a --generate-only run reads the same record a
-		// broadcast would.
+		// uses, against --node (the transaction flag set carries no gRPC
+		// endpoint), so a --generate-only run reads the same record a broadcast
+		// would.
 		resp, err := types.NewQueryClient(clientCtx).CoreSlot(cmd.Context(), &types.QueryCoreSlotRequest{SlotId: id})
 		if err != nil {
 			return fmt.Errorf("read current metadata of slot %d: %w", id, err)
@@ -389,12 +415,65 @@ func updateMetadataCmd() *cobra.Command {
 		if resp.Slot == nil {
 			return fmt.Errorf("read current metadata of slot %d: empty response", id)
 		}
+		// The keeper refuses a signer other than the slot's operator; with the
+		// record in hand that is known here, and refusing now is the difference
+		// between a local error and a broadcast that fails in the block while the
+		// command exits 0.
+		from := clientCtx.GetFromAddress().String()
+		if from != resp.Slot.OperatorAddress {
+			return fmt.Errorf("slot %d is operated by %s; --from is %s, which the chain would refuse", id, resp.Slot.OperatorAddress, from)
+		}
 		merged := patch.apply(resp.Slot.Metadata)
+		// The MERGED record is what the chain validates, and it is not enough that
+		// the named values pass: genesis authoring does not validate metadata, so a
+		// slot can carry an over-long field the keeper would refuse the moment it
+		// is written back. Naming that field replaces it; leaving it unnamed
+		// sends a record the chain rejects, which is refused here instead.
+		if err := types.ValidateMetadata(merged); err != nil {
+			return fmt.Errorf("the record as it would be stored is invalid (%v); a field not named here already exceeds the limit on-chain, so name it to replace it", err)
+		}
 		printMetadataPreview(cmd.ErrOrStderr(), id, resp.Slot.Metadata, merged, patch)
-		return broadcast(cmd, &types.MsgUpdateOperatorMetadata{
-			Operator: clientCtx.GetFromAddress().String(), SlotId: id, Metadata: merged,
-		})
+		return broadcast(cmd, &types.MsgUpdateOperatorMetadata{Operator: from, SlotId: id, Metadata: merged})
 	})
+	// Before the root's pre-run: which of the five flags the operator TYPED.
+	//
+	// The root's PersistentPreRunE runs the SDK's InterceptConfigsPreRunHandler,
+	// whose bindFlags applies every viper value to the flag of the same name
+	// that the operator did not set — through pflag Set, which marks the flag
+	// Changed. `moniker` is a top-level key in every config.toml (`twilightd
+	// init` writes the node's, and the SDK writes the hostname on the first CLI
+	// run against a new home), and <BINARY>_<FLAG> environment variables reach
+	// all five the same way. So after the pre-run, Changed no longer means
+	// "typed": without this hook every call that omitted --moniker replaced the
+	// on-chain moniker with the LOCAL NODE's, which is the wipe of #181 in a new
+	// shape, and the positional form failed as a double moniker on every home
+	// that had a config.toml.
+	//
+	// Cobra runs only the nearest PersistentPreRunE, so this one delegates to
+	// the ancestor's exactly as cobra would have, then restores the five flags to
+	// what the operator typed. The flag names stay as they are: renaming would
+	// dodge the config.toml collision but not the environment path, and the
+	// flags should be named for the fields they set.
+	cmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
+		typed := make(map[string]bool, len(metadataFields))
+		for _, f := range metadataFields {
+			typed[f.flag] = c.Flags().Changed(f.flag)
+		}
+		if err := runAncestorPersistentPreRun(c, args); err != nil {
+			return err
+		}
+		for _, f := range metadataFields {
+			if typed[f.flag] {
+				continue
+			}
+			flag := c.Flags().Lookup(f.flag)
+			if err := flag.Value.Set(flag.DefValue); err != nil {
+				return err
+			}
+			flag.Changed = false
+		}
+		return nil
+	}
 	cmd.Short = "Update an operator's slot metadata, keeping the fields not named"
 	cmd.Long = `Update one or more of a slot's metadata fields.
 
@@ -408,10 +487,13 @@ current value. An explicit empty value clears a field:
 
 At least one field must be named. Each value is limited to 512 bytes, the same
 limit the chain enforces. The record as it will be stored is printed to stderr
-before the transaction is generated or broadcast.
+before the transaction is generated or broadcast, and --from must be the slot's
+operator.
 
-Because the current record is read from a node, --offline is not supported and
---generate-only still needs --node (or --grpc-addr).
+Because the current record is read from --node, --offline is not supported and
+--generate-only still needs --node. A --generate-only document is a snapshot of
+that read: broadcasting it later, after the record changed, writes the snapshot
+back over the newer record.
 
 The older form "update-metadata [slot-id] [moniker]" is still accepted and now
 means --moniker; it is deprecated.`

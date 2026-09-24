@@ -37,10 +37,13 @@ A slot's five metadata fields (`moniker`, `identity`, `website`,
 `security_contact`, `details`; at most 512 bytes each) are updated by flag with
 `twilightd coreslot update-metadata <slot-id> --website … --details …`. Fields
 not named keep their current value; an explicit empty value (`--website ""`)
-clears that field; at least one field must be named. The command reads the
-current record from `--node` first and prints the full record it will store
-before generating or broadcasting, so it needs a node even with
-`--generate-only` and does not run `--offline`.
+clears that field; at least one field must be named, and `--from` must be the
+slot's operator. The command reads the current record from `--node` first and
+prints the full record it will store before generating or broadcasting, so it
+needs a node even with `--generate-only` and does not run `--offline`. A
+`--generate-only` document is a snapshot of that read: broadcasting it later,
+after the record has changed, writes the snapshot back over the newer record.
+The live path is protected by the account sequence.
 
 The chain-side message still carries and stores the **whole** record, so any
 client other than this command must send all five fields or it will clear the

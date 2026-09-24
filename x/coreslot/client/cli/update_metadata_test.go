@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -67,8 +68,8 @@ type metadataRun struct {
 	node     *slotNode
 	operator string
 	txCfg    client.TxConfig
-	stdout   bytes.Buffer // the unsigned transaction, as --generate-only prints it
-	stderr   bytes.Buffer // the preview and any notice
+	stdout   bytes.Buffer // process stdout: the unsigned transaction, and nothing else
+	stderr   bytes.Buffer // process stderr: the preview and any notice
 }
 
 func fullMetadata() *types.OperatorMetadata {
@@ -113,17 +114,27 @@ func runUpdateMetadataAgainst(t *testing.T, nodeSlot uint64, current *types.Oper
 
 	cmd := updateMetadataCmd()
 	cmd.SetContext(context.WithValue(context.Background(), client.ClientContextKey, &clientCtx))
-	cmd.SetOut(&run.stderr)
+	// Both of the command's stdout routes — cobra's and the client context's —
+	// land in the same buffer, and stderr in another, so a preview or notice
+	// that strayed onto stdout would corrupt the document asserted below.
+	cmd.SetOut(&run.stdout)
 	cmd.SetErr(&run.stderr)
+	// Cobra's usage-on-error goes to the out writer when one is set (in
+	// production none is, so it goes to stderr); silenced so that an error
+	// path's stdout can be asserted empty without asserting on cobra's usage.
+	cmd.SilenceUsage = true
 	cmd.SetArgs(append([]string{"3", "--from", run.operator, "--chain-id", "test", "--generate-only"}, args...))
 	return run, cmd.Execute()
 }
 
 // message decodes the transaction the command printed, through the tx codec,
-// and returns its one message.
+// and returns its one message. Stdout must hold that document and nothing
+// else: it is what `--generate-only ... | twilightd tx sign` consumes.
 func (r *metadataRun) message(t *testing.T) *types.MsgUpdateOperatorMetadata {
 	t.Helper()
-	tx, err := r.txCfg.TxJSONDecoder()(bytes.TrimSpace(r.stdout.Bytes()))
+	doc := bytes.TrimSpace(r.stdout.Bytes())
+	require.True(t, json.Valid(doc), "stdout must be exactly one JSON document, got: %q", r.stdout.String())
+	tx, err := r.txCfg.TxJSONDecoder()(doc)
 	require.NoError(t, err, "stdout must be the unsigned transaction document")
 	msgs := tx.GetMsgs()
 	require.Len(t, msgs, 1)
@@ -148,8 +159,10 @@ func TestUpdateMetadataKeepsUnnamedFields(t *testing.T) {
 
 	require.Equal(t, []uint64{3}, run.node.queried, "the current record must be read from the node, once, for this slot")
 
-	// The preview shows the whole record, and says which field moved.
+	// The preview shows the whole record, and says which field moved — on
+	// stderr, never stdout.
 	preview := run.stderr.String()
+	require.NotContains(t, run.stdout.String(), "metadata as this transaction will store it")
 	require.Contains(t, preview, `website           "https://new.example"  (set; was "https://old.example")`)
 	require.Contains(t, preview, `moniker           "slot-three"  (unchanged)`)
 	require.Contains(t, preview, `details           "{\"version\":1}"  (unchanged)`)
@@ -215,6 +228,7 @@ func TestUpdateMetadataPositionalMonikerIsDeprecatedAlias(t *testing.T) {
 	want.Moniker = "renamed"
 	require.Equal(t, want, run.message(t).Metadata, "the positional form must keep the other four fields too")
 	require.Contains(t, run.stderr.String(), "positional moniker is deprecated")
+	require.NotContains(t, run.stdout.String(), "deprecated", "the notice must not corrupt the document on stdout")
 
 	run, err = runUpdateMetadata(t, fullMetadata(), "renamed", "--moniker", "other")
 	require.Error(t, err)
@@ -240,4 +254,50 @@ func TestUpdateMetadataStopsWhenSlotIsUnreadable(t *testing.T) {
 	require.Contains(t, err.Error(), "read current metadata of slot 3")
 	require.Equal(t, []uint64{3}, run.node.queried)
 	require.Empty(t, run.stdout.String(), "no transaction may be generated from a patch alone")
+}
+
+// An unnamed field can already be over the limit on-chain — genesis authoring
+// does not validate metadata — and the named values passing says nothing about
+// it. The MERGED record is what the keeper validates, so the CLI validates that
+// too, and says which field to name.
+func TestUpdateMetadataValidatesTheMergedRecord(t *testing.T) {
+	current := fullMetadata()
+	current.Moniker = strings.Repeat("m", 600)
+
+	run, err := runUpdateMetadata(t, current, "--website", "https://new.example")
+	require.Error(t, err, "the chain would refuse this record; the CLI must not build it")
+	require.Contains(t, err.Error(), "moniker exceeds 512 bytes")
+	require.Contains(t, err.Error(), "name it to replace it")
+	require.Empty(t, run.stdout.String())
+
+	// Naming the over-long field replaces it, and the record is valid again.
+	run, err = runUpdateMetadata(t, current, "--website", "https://new.example", "--moniker", "fixed")
+	require.NoError(t, err)
+	require.NoError(t, types.ValidateMetadata(run.message(t).Metadata))
+}
+
+// The keeper refuses a signer other than the slot's operator. The record is in
+// hand before anything is sent, so that is a local error here rather than a
+// broadcast that fails in the block while the command exits 0.
+func TestUpdateMetadataRefusesNonOperatorSigner(t *testing.T) {
+	stranger := sdk.AccAddress(append([]byte{9}, make([]byte, 19)...)).String()
+	run, err := runUpdateMetadata(t, fullMetadata(), "--website", "x", "--from", stranger)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is operated by "+run.operator)
+	require.Contains(t, err.Error(), "--from is "+stranger)
+	require.Equal(t, []uint64{3}, run.node.queried, "the operator is known from the record that was read")
+	require.Empty(t, run.stdout.String(), "nothing may be generated for a signer the chain would refuse")
+}
+
+// With no arguments the error says what the command wants, not "requires at
+// least 1 arg(s)".
+func TestUpdateMetadataNoArgsNamesTheSlotIDAndFlags(t *testing.T) {
+	cmd := updateMetadataCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--website", "x"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "slot-id is required")
+	require.Contains(t, err.Error(), "--security-contact")
 }
