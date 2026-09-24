@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/std"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -50,7 +52,10 @@ type pinnedChain struct {
 	operator   string
 	payout     string
 	credential string
-	head       int64
+	// consensus is the hex consensus address of the slot's validator key, the
+	// form the CoreSlotByConsensusAddress query takes.
+	consensus string
+	head      int64
 }
 
 // epochLength is the minimum the protocol permits. Using the floor keeps these
@@ -61,6 +66,18 @@ const epochLength = int64(appparams.HardMinEpochLengthBlocks)
 
 func bootPinnedChain(t *testing.T) *pinnedChain {
 	t.Helper()
+	return bootPinnedChainAt(t, 1)
+}
+
+// bootPinnedChainAt boots the same chain with its first block at initialHeight.
+//
+// Every height-bearing genesis field follows the first block, because fresh-genesis
+// validation in all three modules pins them to it: the slot's activation, its
+// policy's validity, the open epoch's start and the epoch anchor. The chain is
+// otherwise identical to one born at height 1.
+func bootPinnedChainAt(t *testing.T, initialHeight int64) *pinnedChain {
+	t.Helper()
+	require.Positive(t, initialHeight)
 	a := bootApp(t)
 
 	registry := codectypes.NewInterfaceRegistry()
@@ -68,22 +85,31 @@ func bootPinnedChain(t *testing.T) *pinnedChain {
 	coreslottypes.RegisterInterfaces(registry)
 	cdc := codec.NewProtoCodec(registry)
 
-	chain := &pinnedChain{app: a, operator: acc(0x02), payout: acc(0x0c), credential: acc(0x28)}
+	const consensusMarker = 7
+	consensusKey := make([]byte, sdked25519.PubKeySize)
+	consensusKey[0] = consensusMarker
+	chain := &pinnedChain{
+		app: a, operator: acc(0x02), payout: acc(0x0c), credential: acc(0x28),
+		consensus: hex.EncodeToString((&sdked25519.PubKey{Key: consensusKey}).Address().Bytes()),
+		// commitThrough produces heights head+1 onward, so the first block it
+		// produces is the chain's first block.
+		head: initialHeight - 1,
+	}
 
 	csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
 	csGen := &coreslottypes.GenesisState{
 		Params: &csParams, NextSlotId: 2,
 		Slots: []*coreslottypes.CoreSlot{{
 			SlotId: 1, OperatorAddress: chain.operator, PayoutAddress: chain.payout,
-			SettlementAddress: chain.credential, ConsensusPubkey: ed25519Any(t, 7),
+			SettlementAddress: chain.credential, ConsensusPubkey: ed25519Any(t, consensusMarker),
 			Status:         coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
 			ConsensusPower: 1, RewardWeight: coreslottypes.DefaultRewardWeight,
-			ActivationSequence: 1, ActivatedHeight: 1, ActivationEffectiveHeight: 1,
+			ActivationSequence: 1, ActivatedHeight: initialHeight, ActivationEffectiveHeight: initialHeight,
 			CurrentSelectionPolicyVersion: 1,
 		}},
 		SelectionPolicies: []*coreslottypes.SelectionPolicyVersion{{
 			SlotId: 1, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
-			ValidFromHeight: 1,
+			ValidFromHeight: initialHeight,
 		}},
 		RewardWeights: []*coreslottypes.OperatorRewardWeight{
 			{SlotId: 1, FinalWeight: coreslottypes.DefaultRewardWeight},
@@ -94,7 +120,15 @@ func bootPinnedChain(t *testing.T) *pinnedChain {
 		p.InitialBlockSubsidy = "100000"
 		p.EpochLengthBlocks = uint64(epochLength)
 	})
-	rGen := genesisState(params, snapshot)
+	rGen := rewardstypes.GenesisState{
+		Params: &params,
+		State: &rewardstypes.RewardsState{
+			CurrentEpoch: 1, CurrentEpochStartHeight: uint64(initialHeight),
+			CumulativeEmitted: "0", CarryForwardRemainder: "0",
+		},
+		CurrentEpochConfig: &snapshot,
+	}
+	canonicalRewardsTimeline(&rGen, uint64(initialHeight))
 
 	genesis := a.DefaultGenesis()
 	genesis[coreslottypes.ModuleName] = cdc.MustMarshalJSON(csGen)
@@ -103,7 +137,7 @@ func bootPinnedChain(t *testing.T) *pinnedChain {
 	require.NoError(t, err)
 
 	_, err = a.InitChain(&abci.RequestInitChain{
-		InitialHeight:   1,
+		InitialHeight:   initialHeight,
 		ConsensusParams: sims.DefaultConsensusParams,
 		AppStateBytes:   appState,
 	})
