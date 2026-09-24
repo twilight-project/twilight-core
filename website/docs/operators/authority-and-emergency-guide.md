@@ -69,9 +69,18 @@ It returns one entry per role with a nomination pending (`role`,
 `transfer.nominee`, `transfer.nominated_height`), primary first. `"transfers": []`
 is the ordinary answer: nothing is in flight for either role. It is a success,
 never a "not found". The incumbent is `coreslot-query params` at the same height.
+The generated `twilightd query coreslot pending-authority-transfers` prints `{}`
+instead of `{"transfers":[]}` when nothing is pending; use `coreslot-query` or
+REST in scripts.
 
 Both the incumbent and the successor should check this before the successor
 accepts: it must show exactly the intended role and nominee.
+
+This view only sees a nomination that **waits**. A key holder can nominate and
+accept in the same block, and then no height ever shows it pending. To detect a
+rotation that has already happened, compare `coreslot-query params`
+(`authority`, `emergency_authority`) against the addresses you recorded, or watch
+for the `coreslot_authority_accepted` event.
 
 ## Recovery
 
@@ -83,14 +92,21 @@ accepts: it must show exactly the intended role and nominee.
   compromised emergency key can deny-of-service (pause) but cannot mint, redirect
   payouts, or change immutable fields; a compromised authority key can queue
   params at the next boundary but cannot change denom/cap or pause.
-- **Unexpected nomination:** a nomination you did not make is the first visible
-  sign that a role's key is in someone else's hands (or that the chain launched
-  from a genesis carrying one). There is no timelock, so the nominee can accept
-  in the next block. Check `pending-authority-transfers` for who is nominated,
-  cancel with `cancel-authority-nomination` while the incumbent key is still
-  yours, then rotate the key. Alert on the
-  `twilight_coreslot_pending_authority_nomination` gauge (see
-  [Monitoring](monitoring.md)) so this is not found by chance.
+- **Authority changed unexpectedly:** if `coreslot-query params` shows an
+  `authority` or `emergency_authority` you did not install, the role has
+  already moved; there is no timelock, and nominate + accept can land in one
+  block. This comparison against your recorded addresses is the check that
+  always works.
+- **Unexpected nomination:** a pending nomination you did not make (see
+  `pending-authority-transfers`, or the
+  `twilight_coreslot_pending_authority_nomination` gauge in
+  [Monitoring](monitoring.md)) means the role's key is being used by someone
+  else — unless it was carried in the launch genesis, which is not evidence of
+  a stolen key but should still be canceled. For a suspected stolen key,
+  canceling alone is not enough (the same key can nominate again): while you
+  still hold the role, nominate a fresh key you control and have it accept,
+  ideally back to back in the same block. The new nomination replaces the
+  pending one.
 
 ## What not to do
 
