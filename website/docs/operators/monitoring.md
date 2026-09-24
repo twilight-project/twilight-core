@@ -14,7 +14,16 @@ inspection.
 Two settings, in two files. The SDK telemetry facility produces the series; CometBFT's
 existing instrumentation endpoint serves them. **Validators need no API server.**
 
-In `app.toml`:
+**Edit the existing keys in place — do not append these blocks.** Every node home
+already has a `[telemetry]` table in `app.toml` and an `[instrumentation]` table in
+`config.toml`, with all of the keys below present. Pasting a second `[telemetry]` or
+`[instrumentation]` header makes every `twilightd` command, `start` included, fail with
+`toml: table telemetry already exists`, and the node stays down until the file is
+fixed. On a four-validator network, two nodes down at once halts the chain. Before
+restarting, check the edited files parse with a harmless command such as
+`twilightd comet show-node-id --home <home>`, which fails fast on a TOML error.
+
+In `app.toml`, change these values in the existing `[telemetry]` table:
 
 ```toml
 [telemetry]
@@ -31,10 +40,13 @@ enable-hostname-label = false
 # Leave empty for the same reason: a service name is prepended to every metric name.
 service-name = ""
 # Attached to every series. The chain id is the one label a fleet dashboard needs.
+# The generated file writes this as `global-labels = [` and `]` on two lines; replace
+# both lines with this one.
 global-labels = [["chain_id", "twilight-testnet-1"]]
 ```
 
-In `config.toml`, on a **private** interface:
+In `config.toml`, change these values in the existing `[instrumentation]` table, on a
+**private** interface:
 
 ```toml
 [instrumentation]
@@ -45,6 +57,14 @@ prometheus_listen_addr = "10.0.0.5:26660"
 The `prometheus_listen_addr` that `twilightd init` writes is `":26660"`, which
 binds **every** interface. Setting `prometheus = true` alone is therefore not enough:
 you MUST also override the address to the private one, or the endpoint is public.
+
+**A wrong address fails silently.** If the address is not assigned on the host, the
+node keeps producing blocks and the only sign is one log line
+(`Prometheus HTTP server ListenAndServe err="... can't assign requested address"`).
+After every restart, `curl http://<addr>/metrics | grep twilightd_build_info` from the
+monitoring host. On a host with no private interface, bind `127.0.0.1` and scrape
+through a tunnel or local agent, or bind the public address behind a firewall rule
+that admits only the monitoring host.
 
 The SDK sink registers in the process-global Prometheus registry, and CometBFT's
 `prometheus_listen_addr` endpoint serves that whole registry. So the one endpoint
@@ -60,6 +80,15 @@ every `twilight_*` series below, with no extra listener:
 **Never bind either endpoint to `0.0.0.0`.** `twilightd_build_info` carries the
 version and commit, and the instrumentation endpoint also exposes peer and mempool
 detail; both belong on the monitoring network only.
+
+**Enabling telemetry also publishes `/metrics` on any API server the node runs** —
+there is no separate switch (the SDK attaches telemetry to the API server whenever
+`[telemetry] enabled = true`). A node whose API is reachable from the internet, such as
+a public REST endpoint behind a reverse proxy, therefore starts serving
+`twilightd_build_info`, every `twilight_*` series and Go runtime statistics to anyone
+the moment telemetry is turned on. On such a node, **deny `/metrics` at the proxy
+before enabling telemetry** (for nginx: `location = /metrics { return 404; }` in the
+public server block), or leave telemetry off there and scrape another node.
 
 Full nodes that already run the API server have a second option: with the same
 `[telemetry]` block, the API server serves the series at
