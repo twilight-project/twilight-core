@@ -185,6 +185,16 @@ counter is a consensus-state change and is tracked separately.
 | `twilight_coreslot_pending_key_rotations` | | Consensus-key rotations queued and not yet effective | 0 except during a rotation |
 | `twilight_coreslot_pending_authority_nomination` | `role` = `primary` \| `emergency` | An authority handover is nominated and not yet accepted or canceled | 0 except during a handover |
 
+**The nomination gauge only sees a nomination that waits.** It catches the honest
+two-step handover, a nomination carried in genesis, and an attacker who nominates and
+then pauses. It does **not** catch someone holding the authority key who nominates and
+accepts in the same block: both transactions are admitted before either executes, the
+nomination exists only inside that block, and the gauge — like the
+`pending-authority-transfers` query — reads 0 before and after. Treat the gauge as an
+early warning, never as the control. The control is an alert on **the authority
+addresses themselves differing from the recorded, known-good values** (see "Authority
+changed" below).
+
 ### Exporter health
 
 | Metric | Labels | Meaning |
@@ -204,8 +214,16 @@ testnet's 360-block epochs; scale to your epoch length.
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
+| Authority nomination pending | `max by (role) (twilight_coreslot_pending_authority_nomination) == 1` | A handover is waiting to be accepted. Expected only during a planned rotation; otherwise an incident. Blind to a same-block nominate + accept (see above) |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
+
+**Authority changed:** no gauge carries the authority addresses yet, so this check runs
+outside Prometheus: on a schedule, compare `twilightd coreslot-query params`
+(`authority`, `emergency_authority`) against the addresses recorded when the network
+launched or last rotated, and page on any difference. This is the check that catches a
+stolen authority key, whatever order its holder uses. An exported
+`authority_info` series that Prometheus can alert on is tracked as a follow-up.
 
 **Liveness:** `absent(twilightd_build_info)` on a node whose metrics endpoint is up
 means it has not committed within the retention window. Every `twilight_*` gauge
