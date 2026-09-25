@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for non-security feature requests.
+        Use this form for feature requests.
 
-        **Do not describe security vulnerabilities here.** If the request involves funds, validator keys, consensus safety, private data, or network security, follow the private disclosure process in [SECURITY.md](/SECURITY.md).
+        **Do not describe newly discovered security vulnerabilities here.** If the request would reveal a new, unreported weakness involving funds, validator keys, consensus safety, private data, or network security, report it privately via [Private Vulnerability Reporting](https://github.com/twilight-project/twilight-core/security/advisories/new); see [SECURITY.md](https://github.com/twilight-project/twilight-core/blob/main/SECURITY.md). Requests that address a known testnet limitation already tracked publicly are welcome here, per the public testnet policy in SECURITY.md.
 
   - type: textarea
     id: problem
@@ -34,8 +34,8 @@ body:
       label: Affected area
       options:
         - x/coreslot
-        - x/emissions
         - x/rewards
+        - x/mining
         - app / module wiring
         - CLI / REST / gRPC
         - genesis / config

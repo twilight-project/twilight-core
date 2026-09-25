@@ -1,20 +1,30 @@
 # Contributing to Twilight Core
 
 Thanks for your interest in Twilight Core — a Cosmos SDK / CometBFT Proof-of-Authority
-chain (`x/coreslot` for validator admission, `x/rewards` for the emission economy). The
-standard staking, slashing, gov, mint, and distribution modules are **intentionally
+chain with three custom modules:
+
+- **`x/coreslot`** — validator admission and the validator set.
+- **`x/rewards`** — the emission economy: epoch emission and per-`(slot, epoch)`
+  entitlements.
+- **`x/mining`** — the settlement workflow: a block-driven settlement clock, settlement sets
+  materialized at epoch close, chunked payouts, and finalization releasing the remainder to
+  the recorded payout address. It holds no bank keeper; value moves only through
+  `x/rewards`.
+
+The standard staking, slashing, gov, mint, and distribution modules are **intentionally
 omitted** (not wired into the app) — the validator set and token economics are handled
-entirely by `x/coreslot` and `x/rewards`.
+entirely by these custom modules.
 
 This is a young project under active development. Contributions are welcome; because the
 code is consensus- and value-critical, the bar for changes to `x/coreslot`, `x/rewards`,
-and `app/` is high.
+`x/mining`, and `app/` is high.
 
 ## Before you start
 
 - For anything non-trivial, **open an issue first** to discuss the approach.
-- For a **security vulnerability, do not open an issue** — follow
-  [`SECURITY.md`](SECURITY.md).
+- For a **newly discovered security vulnerability, do not open an issue** — report it
+  privately as described in [`SECURITY.md`](SECURITY.md). Known testnet limitations are
+  tracked openly as issues; see the public testnet policy there.
 - Read the design background in [`docs/architecture/`](docs/architecture/) (ADRs) and the
   module docs on the documentation site under [`website/`](website/).
 
@@ -41,8 +51,9 @@ make drills                   # lifecycle + restart-rotation + quorum drills
 ## Branching & commits
 
 - Work on a feature branch off **`main`**, and open a PR back into `main`. There is no
-  long-lived integration branch: `main` is the trunk, and every merge is a merge commit
-  (never a squash or rebase) so a reviewed head stays identifiable in the history.
+  long-lived integration branch: `main` is the trunk. Changes reach `main` only through a
+  pull request, and the repository allows **merge commits only** (squash and rebase merges
+  are disabled) so a reviewed head stays identifiable in the history.
 - A release is a **tag on `main`**, not a branch promotion.
 - Use **[Conventional Commits](https://www.conventionalcommits.org/)** — e.g.
   `feat(rewards): ...`, `fix(coreslot): ...`, `docs: ...`, `chore(ci): ...`.
@@ -132,10 +143,20 @@ is used. RocksDB is an indirect dependency and is not compiled in without its bu
 
 ## Review & quality gates
 
-Every change must pass **CI** (build, tests, `golangci-lint`, gofmt, `go mod tidy`) before
-merge. We additionally run a multi-model review pass on changes; see [`REVIEW.md`](REVIEW.md)
-for the process and the PR checklist. Consensus-critical changes require maintainer
-approval.
+The `main` branch ruleset **enforces** that every change arrives through a pull request and
+passes the six required CI checks — build & test, consensus vectors, `golangci-lint`, gofmt
+& tidy, proto descriptor up to date, and `govulncheck` — before it can merge. See
+[`REVIEW.md`](REVIEW.md) for what each check covers, the multi-model review pass we run
+on changes, and the PR checklist. The one exception is a fix merged from a security
+advisory's private fork, which bypasses CI and the ruleset; the maintainer runs the
+CI-equivalent `make` targets listed in `REVIEW.md` locally before merging it, and CI runs
+again on `main` afterwards.
+
+Review of consensus-critical changes by a maintainer is a **process expectation**, not
+something the ruleset enforces today: with a single maintainer ([`MAINTAINERS.md`](MAINTAINERS.md)),
+required approvals are set to zero, because a sole maintainer cannot approve their own pull
+request. Code-owner routing and required approvals will be added once there is more than one
+maintainer.
 
 ## Determinism rules (important for a chain)
 
@@ -150,11 +171,12 @@ State-machine code must be **deterministic** across nodes:
 - Never introduce a second source of `ValidatorUpdate`s — the validator set is owned
   exclusively by `x/coreslot`.
 
-## License & DCO
+## License
 
-By contributing, you agree your contributions are licensed under the project's
-[Apache-2.0](LICENSE) license. Please sign off your commits (`git commit -s`,
-[Developer Certificate of Origin](https://developercertificate.org/)).
+Twilight Core is licensed under [Apache-2.0](LICENSE). Under section 5 of that license, unless
+you explicitly state otherwise, any contribution you intentionally submit for inclusion is
+licensed under the same terms, without any additional terms or conditions. No commit sign-off
+or contributor license agreement is required.
 
 ## Code of Conduct
 

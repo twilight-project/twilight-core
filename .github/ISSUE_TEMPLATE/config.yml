@@ -2,7 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
     url: https://github.com/twilight-project/twilight-core/security/advisories/new
-    about: Report security issues privately — never in a public issue. See SECURITY.md.
-  - name: Question / discussion
-    url: https://github.com/twilight-project/twilight-core/discussions
-    about: Ask questions and discuss ideas (enable Discussions on the repo).
+    about: Report newly discovered vulnerabilities privately via Private Vulnerability Reporting — never in a public issue. See SECURITY.md.
+  - name: Documentation
+    url: https://twilight-project.github.io/twilight-core/
+    about: Concepts, module reference, and operator guides. See SUPPORT.md for where to ask questions.

@@ -50,11 +50,17 @@ individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported
-privately to the maintainers through the repository's private reporting channel
-(**Security → Report a vulnerability** on
-[the repository](https://github.com/twilight-project/twilight-core/security/advisories/new)),
-which is visible only to maintainers. All complaints will be reviewed and investigated
-promptly and fairly.
+privately through the repository's private reporting form:
+<https://github.com/twilight-project/twilight-core/security/advisories/new> (also reachable
+as **Report a vulnerability** on the repository's Security tab). Although the form is
+labelled for vulnerabilities, **conduct reports are accepted there**, and a report submitted
+through it is visible only to you and the repository's administrators and security managers.
+All complaints will be reviewed and investigated promptly and fairly.
+
+The project currently has a single maintainer (see [`MAINTAINERS.md`](MAINTAINERS.md)), so
+there is not yet an independent contact for a complaint about that maintainer. For conduct
+on GitHub, such a complaint can also be sent to GitHub itself through its **Report abuse**
+feature. An independent contact will be added when the maintainer group grows.
 
 All community leaders are obligated to respect the privacy and security of the reporter of
 any incident.

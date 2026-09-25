@@ -16,6 +16,7 @@
 
 - [ ] `x/coreslot` — consensus / validator set (**consensus-critical**)
 - [ ] `x/rewards` — emission / epoch accounting / reward claims / economics (**consensus-critical**)
+- [ ] `x/mining` — mining plane / settlement (**consensus-critical**)
 - [ ] `app/` wiring
 - [ ] CLI / REST / gRPC surface
 - [ ] proto / generated code
@@ -47,7 +48,7 @@ Required for consensus-critical changes:
 ## Security considerations
 
 - [ ] No secrets, private keys, mnemonics, RPC credentials, private IPs, or sensitive infrastructure details included
-- [ ] This PR does not introduce a public security disclosure
+- [ ] This PR does not publicly disclose a newly discovered vulnerability (those go through Private Vulnerability Reporting; see SECURITY.md)
 - [ ] Security-sensitive behavior is clearly called out for reviewer attention
 
 Notes:
@@ -56,10 +57,10 @@ Notes:
 
 ## Review
 
-See [REVIEW.md](../REVIEW.md).
+See [REVIEW.md](https://github.com/twilight-project/twilight-core/blob/main/REVIEW.md).
 
 - [ ] Multi-model adversarial review pass completed where applicable
-- [ ] Maintainer review required for consensus-critical paths
+- [ ] Maintainer review requested for consensus-critical paths (a process expectation; the ruleset enforces the required CI checks, not approvals)
 - [ ] Risky files / assumptions called out below
 
 ## Reviewer notes

@@ -1,9 +1,9 @@
 # Review Process
 
-Twilight Core is consensus- and value-critical, so every change must be reviewed before it
-lands. This document describes how — both the automated gates and the multi-model
-adversarial review used heavily during early development and, going forward, alongside
-maintainer review.
+Twilight Core is consensus- and value-critical, so every change is reviewed before it
+lands. This document describes how — what the `main` branch ruleset enforces, the automated
+gates, and the multi-model adversarial review used heavily during early development and,
+going forward, alongside maintainer review.
 
 ## Process history (full transparency)
 
@@ -23,17 +23,58 @@ retroactively by:
 - the going-forward automated gates, simulations, and chaos drills, which run against the
   current code regardless of how it was originally merged.
 
-We deliberately do **not** fabricate back-dated issues/PRs or rewrite history. For code,
-the assurance that matters is the *current* state plus the recorded review and tests
-attached to it.
+We deliberately do **not** fabricate back-dated issues/PRs, and we do not rewrite shared
+history. There is one recorded exception: a single history rewrite on 2026-09-25, before the
+repository moved to the `twilight-project` organization, that removed stray development
+artifacts (committed and later deleted) without changing any branch's or tag's source tree —
+see
+[docs/history-rewrite-2026-09.md](docs/history-rewrite-2026-09.md). For code, the assurance
+that matters is the *current* state plus the recorded review and tests attached to it.
 
-## Automated gates (CI — required to merge)
+## What the `main` ruleset enforces
 
-Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+These are enforced by GitHub on the `main` branch, not merely expected, for every merge
+through a pull request (security-advisory merges are the one exception, described below):
 
-- **build & test** — `go build ./...`, `go test ./...`
+- **Pull requests required** — changes reach `main` only through a pull request.
+- **Required status checks** — the six CI checks below must pass before merge.
+- **Merge commits only** — squash and rebase merges are not allowed, so a reviewed head
+  stays identifiable in the history.
+- **No force-push and no deletion** of `main`.
+
+**Exception — security fixes.** A fix for a privately reported vulnerability is developed in
+the security advisory's temporary private fork. GitHub runs no status checks there, CI cannot
+access the fork, and branch protection and rulesets are **not** enforced when the advisory is
+merged. Before merging from an advisory fork, the maintainer therefore runs the
+CI-equivalent checks locally:
+
+```bash
+make build test consensus-vectors lint vet vuln
+make check-vulncheck-pin release-upgrade-faults block-gas-faults check-genesis-faults check-cli-surface
+make fmt tidy proto-descriptor   # then confirm `git status` shows no changes
+```
+
+CI then runs again on `main` after the merge.
+
+**Required approvals are currently zero.** The project has a single maintainer (see
+[`MAINTAINERS.md`](MAINTAINERS.md)), and a sole maintainer cannot approve their own pull
+request, so requiring an approval would block every change. Maintainer review is therefore a
+process expectation (see [Human review](#human-review)), not a ruleset guarantee. Code-owner
+routing and required approvals will be added once there is more than one maintainer.
+
+## Automated gates (required CI checks)
+
+Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (security-advisory
+fixes excepted — see above):
+
+- **build & test** — `go build ./...`, `go test ./...`, plus the harness fault checks
+  (release-upgrade rehearsal, block-gas drill, genesis verifier), the vulncheck
+  toolchain-pin check, and the CLI-surface check in the same job
+- **consensus vectors** — conformance against the normative protocol vector packs
 - **golangci-lint** — static analysis (`.golangci.yml`)
 - **gofmt & tidy** — formatting and a clean `go mod tidy`
+- **proto descriptor up to date** — the committed descriptor set matches a pinned-`protoc`
+  regeneration
 - **govulncheck** — dependency vulnerability scan; **blocking** (a newly reachable
   advisory fails CI; advisories in modules the code does not call do not)
 
@@ -62,7 +103,8 @@ practical with current tooling:
    cases, and unsafe assumptions, treating the change as guilty until proven correct.
 3. **Self-review pass** — an automated self-review before the change is opened, catching
    regressions and style/contract violations.
-4. **PR review** — an automated reviewer on the pull request as the final gate.
+4. **PR review** — an automated review pass on the pull request. It is advisory: it does
+   not block a merge.
 
 This is a strong **defect-removal** layer, but it does **not** replace maintainer
 responsibility, deterministic tests, simulations, operational drills, or independent expert
@@ -73,18 +115,22 @@ security audit** (see [`SECURITY.md`](SECURITY.md)).
 
 ## Human review
 
-While the project is small, maintainer approval is required for consensus-critical changes.
-Consensus-critical areas include:
+Consensus-critical changes are expected to receive a **maintainer review**, alongside the
+adversarial review above, before they merge. While there is a single maintainer this is a
+process commitment rather than an enforced approval (see
+[What the `main` ruleset enforces](#what-the-main-ruleset-enforces)). Consensus-critical
+areas include:
 
 - `x/coreslot` validator-set and lifecycle logic;
 - `x/rewards` finalization, emission, and economic accounting;
+- `x/mining` finalization and settlement;
 - `app/` wiring;
 - upgrade handlers;
 - genesis import/export behavior;
 - any code path that can affect deterministic state transitions or `ValidatorUpdate`s.
 
-As the contributor base grows, branch protection will require at least one independent
-approving review for these paths.
+Once there is more than one maintainer, the ruleset will route these paths to code owners
+and require at least one approving review from someone other than the author.
 
 ## Reviewer checklist
 
