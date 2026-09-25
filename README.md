@@ -159,8 +159,9 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 Copyright 2026 The Twilight Project Authors — the project's contributors, as recorded in its
 git history. See [NOTICE](NOTICE).
 
-"Twilight" and "TWLT" are names of the Twilight Project; the license grants no rights to use
-them as trademarks (Apache-2.0 §6).
+"Twilight" and "TWLT" are names of the Twilight Project. The license does not grant
+permission to use these names as trademarks, except as required for reasonable and customary
+use in describing the origin of the work (Apache-2.0 §6).
 
 Release binaries also contain third-party modules under their own licenses, reproduced in
 the `THIRD_PARTY_NOTICES` file shipped with each release. The source of each, at the version

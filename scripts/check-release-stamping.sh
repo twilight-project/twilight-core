@@ -196,6 +196,47 @@ make build-release VERSION=v9.9.9 >/dev/null 2>&1
 check "pre-existing artifacts survive"  "present" \
   "$([[ -f build/release/PREEXISTING ]] && echo present || echo absent)"
 cleanup; rm -rf build/release
+
+echo
+echo "=== a release that fails partway leaves the previous release untouched ==="
+# The release is staged and swapped in only once complete. Before that, a build
+# failing on the second target, or go.sum changing under the build, left the
+# release directory wiped and holding officially named binaries with no
+# SHA256SUMS. A stand-in go on PATH forces each failure after real work is done;
+# every other go invocation passes through to the real toolchain.
+REAL_GO="$(command -v go)"
+SHIM="$(mktemp -d)"
+cat >"$SHIM/go" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == build && "\${GOOS:-}/\${GOARCH:-}" == "\${SHIM_TARGET:-}" ]]; then
+  case "\${SHIM_MODE:-}" in
+    fail)   echo "forced build failure" >&2; exit 1 ;;
+    tamper) "$REAL_GO" "\$@" || exit
+            echo "example.com/tamper v0.0.0/go.mod h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" >>go.sum
+            exit 0 ;;
+  esac
+fi
+exec "$REAL_GO" "\$@"
+EOF
+chmod +x "$SHIM/go"
+release_snapshot() { ( cd build/release 2>/dev/null && ls -A | LC_ALL=C sort && cksum -- * ); }
+leftovers() { find build -maxdepth 1 \( -name '.release-staging.*' -o -name '.release-old.*' \) 2>/dev/null | wc -l | tr -d ' '; }
+for spec in "fail linux/arm64" "tamper darwin/arm64"; do
+  read -r mode target <<<"$spec"
+  mkdir -p build/release
+  echo "previous binary" >build/release/twilightd-v0.0.1-linux-amd64
+  ( cd build/release && cksum twilightd-v0.0.1-linux-amd64 >SHA256SUMS )
+  before="$(release_snapshot)"
+  touch "$SHIM/marker"
+  PATH="$SHIM:$PATH" SHIM_MODE="$mode" SHIM_TARGET="$target" make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
+  check "$mode on $target refuses"               "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
+  check "$mode: previous release byte-identical" "same" "$([[ "$(release_snapshot)" == "$before" ]] && echo same || echo changed)"
+  check "$mode: nothing in it rewritten"         "0" "$(find build/release -newer "$SHIM/marker" | wc -l | tr -d ' ')"
+  check "$mode: no staging left behind"          "0" "$(leftovers)"
+  rm -rf build/release
+done
+rm -rf "$SHIM"
+
 echo
 echo "=== and succeeds once the tree is clean again ==="
 make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
@@ -219,6 +260,20 @@ for a in build/release/twilightd-v9.9.9-*; do
     && flags_all=$((flags_all + 1))
 done
 check "every artifact is trimpath+CGO0"   "3" "$flags_all"
+
+echo
+echo "=== code-generation variables cannot alter a release ==="
+# GOAMD64=v3 produced a different linux/amd64 binary under the same release name,
+# and GOEXPERIMENT carried through the same way. The release pins both, so the
+# artifacts must be byte-identical to the clean run above.
+CLEAN_SUMS="$(cat build/release/SHA256SUMS 2>/dev/null)"
+check "probe GOAMD64 reaches go"          "v3"         "$(GOAMD64=v3 go env GOAMD64)"
+check "probe GOEXPERIMENT is valid here"  "greenteagc" "$(GOEXPERIMENT=greenteagc go env GOEXPERIMENT 2>/dev/null)"
+rm -rf build/release
+GOAMD64=v3 GOEXPERIMENT=greenteagc make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
+check "release builds under the probe"    "0" "$rc"
+check "artifacts identical to clean run"  "same" \
+  "$([[ -n "$CLEAN_SUMS" && "$(cat build/release/SHA256SUMS 2>/dev/null)" == "$CLEAN_SUMS" ]] && echo same || echo different)"
 rm -rf build/release
 make build >/dev/null 2>&1   # leave a normally-stamped binary behind
 

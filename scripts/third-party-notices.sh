@@ -28,9 +28,10 @@
 # does, and a go.sum missing an entry the build needs fails here as it fails
 # there. It never writes go.mod or go.sum, and checks that it did not.
 #
-# Exits non-zero, writing nothing, if any linked module ships no LICENSE/COPYING
-# file: a release must not ship a component whose terms it cannot state, and a
-# NOTICE or PATENTS file alone does not state them.
+# Exits non-zero, writing nothing, if any linked module has no LICENSE/COPYING
+# file at its root: a release must not ship a component whose terms it cannot
+# state, a NOTICE or PATENTS file alone does not state them, and a license kept
+# beside bundled code in a subdirectory covers that code, not the module.
 #
 # Usage: scripts/third-party-notices.sh [OUTPUT]      (default: stdout)
 #   RELEASE_TARGETS  space-separated GOOS/GOARCH list
@@ -49,6 +50,11 @@ export LC_ALL=C
 # user go env file, which an empty GOFLAGS does not override — could add build
 # tags that link something else.
 export GOENV=off GOWORK=off GOFLAGS=-mod=readonly CGO_ENABLED=0
+# Code-generation selectors pinned to the toolchain defaults, as build-release.sh
+# pins them: GOEXPERIMENT in particular sets goexperiment.* build tags, which can
+# change which files — and so which packages — are linked.
+export GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOFIPS140=off
+unset GOARM GO386 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM
 
 die() { echo "third-party-notices: $*" >&2; exit 1; }
 
@@ -123,12 +129,14 @@ done <"$WORK/dirs"
 sort -t $'\t' -k1,1 -k4,4 -u "$WORK/files" -o "$WORK/files"
 
 cut -f1,2 "$WORK/pkgs" | sort -u >"$WORK/modules"
+# The module's own terms must be at its root: a license beside bundled code in a
+# subdirectory (internal/snapref/LICENSE, say) covers that code, not the module.
 while IFS=$'\t' read -r mod _ _ r kind; do
-  if [[ "$kind" == own ]] && is_terms_name "${r##*/}"; then printf '%s\n' "$mod"; fi
+  if [[ "$kind" == own && "$r" != */* ]] && is_terms_name "$r"; then printf '%s\n' "$mod"; fi
 done <"$WORK/files" | sort -u >"$WORK/with-terms"
 MISSING="$(cut -f1 "$WORK/modules" | comm -23 - "$WORK/with-terms")"
 if [[ -n "$MISSING" ]]; then
-  echo "third-party-notices: no LICENSE or COPYING file found for these linked modules:" >&2
+  echo "third-party-notices: no LICENSE or COPYING file at the module root for these linked modules:" >&2
   sed 's/^/  /' <<<"$MISSING" >&2
   exit 1
 fi
