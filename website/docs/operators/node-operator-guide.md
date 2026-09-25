@@ -107,7 +107,14 @@ sed -i 's#^persistent_peers =.*#persistent_peers = "<node-id>@<host>:26656"#' \
 ```
 
 Then start the node. For anything longer-lived than a test, run it under a service
-manager so it restarts after a crash and survives a reboot. A minimal systemd unit:
+manager so it restarts after a crash and survives a reboot. First install the binary
+built above where the unit expects it (from the repository root):
+
+```bash
+sudo install -m 0755 build/twilightd /usr/local/bin/twilightd
+```
+
+A minimal systemd unit:
 
 ```ini
 # /etc/systemd/system/twilightd.service
@@ -150,14 +157,27 @@ restart; `/status` then shows a non-zero `validator_info.voting_power`.
 
 **Re-joining after a re-genesis.** When a network restarts from a new genesis, stop
 the node and run `twilightd comet unsafe-reset-all --home ~/.twilightd`. This wipes
-the chain databases and zeroes `data/priv_validator_state.json` but keeps your keys.
-Then replace `config/genesis.json` with the new document and start again.
+the chain databases, zeroes `data/priv_validator_state.json` and deletes the address
+book (`config/addrbook.json`), but keeps your keys and configuration, so
+`persistent_peers` in `config.toml` still names your peers. Then replace
+`config/genesis.json` with the new document and start again.
+
+If the new genesis also carries a new chain-id, update `chain-id` in
+`config/client.toml`. Nothing rewrites it after the first `init`, and the CLI signs
+transactions for the chain-id that file names unless `--chain-id` is passed:
+
+```bash
+sed -i 's#^chain-id = .*#chain-id = "<new-chain-id>"#' ~/.twilightd/config/client.toml
+```
 
 **`twilightd init` does not reset existing configuration.** Run over a home that
 already has an `app.toml` and `config.toml`, it keeps their values and updates only
 the moniker, so settings from an earlier deployment (pruning, `min-retain-blocks`, API
 enablement, peers) carry over silently. Review them after re-initialising a home
-directory.
+directory. It also leaves `client.toml` alone (see above), and it refuses to run while
+`config/genesis.json` exists (`genesis.json file already exists`) unless you pass
+`--overwrite`, which replaces that file with a fresh default genesis. Install the
+network's genesis again afterwards.
 
 ## Check status and agreement
 
