@@ -34,7 +34,7 @@ wiped and re-genesis'd at any time (you'll just re-join).
 ## 1. Build `twilightd`
 
 ```bash
-git clone https://github.com/usmanshahid86/twilight-core
+git clone https://github.com/twilight-project/twilight-core
 cd twilight-core
 CGO_ENABLED=0 go build -o build/twilightd ./cmd/twilightd
 sudo install build/twilightd /usr/local/bin/twilightd

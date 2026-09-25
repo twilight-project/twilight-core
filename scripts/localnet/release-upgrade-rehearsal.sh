@@ -47,7 +47,7 @@ set +e
 # Not caller-overridable. "v0.1.0 -> v0.2.0 qualification" has to mean one thing,
 # and an environment variable that silently changed which release was tested would
 # make a PASS unattributable.
-readonly RELEASE_REPO="usmanshahid86/twilight-core"
+readonly RELEASE_REPO="twilight-project/twilight-core"
 readonly FROM_TAG="v0.1.0"
 readonly EXPECTED_A_COMMIT="b8ed78ed29f1667fceab8476f5e303c589471fa7"
 readonly UPGRADE_NAME="v0.2.0"

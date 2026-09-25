@@ -1,7 +1,7 @@
 # ADR-0003: Upgrade path — authority-gated `x/upgrade`, without governance
 
 - **Status:** Accepted — decision recorded. The wiring, genesis change and upgrade drill are
-  tracked in [#131](https://github.com/usmanshahid86/twilight-core/issues/131).
+  tracked in [#131](https://github.com/twilight-project/twilight-core/issues/131).
 - **Date:** 2026-08-21
 - **Relates to:** [architecture overview](../overview.md),
   [ADR-0001](0001-coreslot-poa.md) (the authority model this reuses)
@@ -200,7 +200,7 @@ recoverable by retry.
 **The upgrade path inherits the authority's weaknesses.** Whatever can compromise or misdirect
 the authority now also reaches the upgrade mechanism. That raises the value of hardening
 authority rotation, tracked in
-[#130](https://github.com/usmanshahid86/twilight-core/issues/130).
+[#130](https://github.com/twilight-project/twilight-core/issues/130).
 
 **`--unsafe-skip-upgrades` is a deliberate exception to the determinism invariant.**
 `AGENTS.md` invariant 4 says no state transition may read node-local config. x/upgrade's
