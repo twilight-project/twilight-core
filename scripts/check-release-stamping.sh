@@ -166,6 +166,29 @@ check "no drill handler leaks into artifacts" "0" "$leaked"
 rm -rf build/release
 
 echo
+echo "=== a user go env file cannot alter a release ==="
+# go treats an empty GOFLAGS as unset and falls back to the user's go env file, so
+# clearing the variable alone let `go env -w GOFLAGS=-tags=upgradedrill` compile
+# the drill handler into every artifact while the stamp reported no tags. The
+# probe file lives outside the tree so it cannot trip the untracked-file refusal.
+GOENV_PROBE="$(mktemp -d)/env"
+printf 'GOFLAGS=-tags=upgradedrill\n' >"$GOENV_PROBE"
+# The premise, so the case below cannot pass vacuously: this file does reach go.
+check "probe go env file sets GOFLAGS"      "-tags=upgradedrill" "$(GOENV="$GOENV_PROBE" GOFLAGS= go env GOFLAGS)"
+GOENV="$GOENV_PROBE" make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
+check "release builds under the probe"      "0" "$rc"
+check "three artifacts under the probe"     "3" "$(ls build/release/twilightd-v9.9.9-* 2>/dev/null | wc -l | tr -d ' ')"
+leaked=0; tagged=0
+for a in build/release/twilightd-v9.9.9-*; do
+  [[ -e "$a" ]] || continue
+  grep -aqF 'drill-v2' "$a" && leaked=$((leaked + 1))
+  go version -m "$a" 2>/dev/null | grep -q -- '-tags=' && tagged=$((tagged + 1))
+done
+check "go env file leaks no drill handler"  "0" "$leaked"
+check "go env file adds no build tags"      "0" "$tagged"
+rm -rf "$(dirname "$GOENV_PROBE")" build/release
+
+echo
 echo "=== a refusal preserves artifacts that were already there ==="
 mkdir -p build/release && echo sentinel >build/release/PREEXISTING
 echo "// provenance probe" >>"$PROBE"

@@ -86,7 +86,7 @@ tools/            auxiliary tooling (the read-only dashboard)
 ## Prerequisites
 
 - **Go 1.25.x** (the version pinned in `go.mod`), **make**, and **git** — to build and test.
-- **jq** and **curl** — used by the localnet scripts.
+- **jq**, **curl**, and **lsof** — used by the localnet scripts and drills.
 - **protoc** — only if you regenerate protobuf (`make proto`).
 - **Node.js + npm** — only to build the documentation site under `website/`.
 
@@ -156,4 +156,13 @@ issues. See [SECURITY.md](SECURITY.md) for scope and what to expect.
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
-Copyright 2026 The Twilight Project Authors — see [NOTICE](NOTICE).
+Copyright 2026 The Twilight Project Authors — the project's contributors, as recorded in its
+git history. See [NOTICE](NOTICE).
+
+"Twilight" and "TWLT" are names of the Twilight Project; the license grants no rights to use
+them as trademarks (Apache-2.0 §6).
+
+Release binaries also contain third-party modules under their own licenses, reproduced in
+the `THIRD_PARTY_NOTICES` file shipped with each release. The source of each, at the version
+linked, is available from its upstream repository and from
+`https://proxy.golang.org/<module-path>/@v/<version>.zip`.

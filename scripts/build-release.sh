@@ -64,7 +64,16 @@ done
 # drill upgrade handler into the binary while BuildTags is stamped from our own
 # variable and reports nothing. A release must not depend on the environment it
 # happened to be cut from.
-export GOFLAGS=
+#
+# Clearing the variable is not enough on its own: go treats an empty GOFLAGS as
+# unset and falls back to the user's go env file (`go env -w GOFLAGS=...`), which
+# injected the same tags. GOENV=off stops that file being read at all; GOROOT's
+# own go.env defaults (proxy, checksum database, toolchain) still apply, and
+# anything an operator genuinely needs can still be passed as a real environment
+# variable. The flags are set explicitly, not left to defaults, and the
+# third-party-notices step sets the same ones, so it lists exactly the module set
+# this build links.
+export GOENV=off GOWORK=off GOFLAGS=-mod=readonly
 
 COMMIT="$(git rev-parse HEAD)"
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo unknown)}"
@@ -84,8 +93,17 @@ git archive HEAD | tar -x -C "$SRC" || refuse "could not export HEAD"
 for f in LICENSE NOTICE; do
   [[ -f "$SRC/$f" ]] || refuse "$f is missing from HEAD"
 done
+# The exported go.mod/go.sum are the commit's. Nothing after this point may
+# change them: a step that filled in a missing go.sum entry would let a release
+# build from a commit whose own go.sum could not build it.
+cp "$SRC/go.mod" "$META/go.mod.committed" && cp "$SRC/go.sum" "$META/go.sum.committed" \
+  || refuse "could not record the committed go.mod/go.sum"
+module_files_unchanged() {
+  cmp -s "$SRC/go.mod" "$META/go.mod.committed" && cmp -s "$SRC/go.sum" "$META/go.sum.committed"
+}
 ( cd "$SRC" && RELEASE_TARGETS="$TARGETS" bash ./scripts/third-party-notices.sh "$META/THIRD_PARTY_NOTICES" ) \
   || refuse "could not produce the third-party notices"
+module_files_unchanged || refuse "go.mod or go.sum changed while producing the third-party notices"
 
 LDFLAGS="-X github.com/cosmos/cosmos-sdk/version.Version=$VERSION \
 -X github.com/cosmos/cosmos-sdk/version.Commit=$COMMIT \
@@ -104,6 +122,7 @@ for t in $TARGETS; do
       go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/$name" ./cmd/twilightd ) \
     || refuse "build failed for $t"
 done
+module_files_unchanged || refuse "go.mod or go.sum changed during the build"
 
 cp "$SRC/LICENSE" "$SRC/NOTICE" "$META/THIRD_PARTY_NOTICES" "$OUT/" \
   || refuse "could not copy the license files"
