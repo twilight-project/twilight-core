@@ -7,7 +7,7 @@ Read this before making changes.
 ## What this is
 
 Twilight Core is a greenfield **Cosmos SDK / CometBFT Proof-of-Authority chain**. The
-node binary is `twilightd`. Two custom modules carry the design:
+node binary is `twilightd`. Three custom modules carry the design:
 
 - **`x/coreslot`** — validator admission and the validator set (PoA). Operators are
   admitted to authority-governed *CoreSlots*; its EndBlocker is the **only** source of
@@ -16,6 +16,10 @@ node binary is `twilightd`. Two custom modules carry the design:
   allocation by active-block participation, and per-`(slot, epoch)` entitlements released by
   settlement. An emergency authority can pause rewards, which stops accrual and release
   together.
+- **`x/mining`** — the settlement workflow over those entitlements. It runs a block-driven
+  settlement clock, materializes each epoch's settlement set when the epoch closes, releases
+  payouts in chunks, and on finalization releases the remainder to the recorded payout
+  address. It holds **no bank keeper** — all value moves through `x/rewards`.
 
 The standard **staking, distribution, governance, mint, and slashing** modules are
 **intentionally omitted** (not wired into `app/`). `auth`, `bank`, and `consensus` are
@@ -57,6 +61,8 @@ branch ruleset: build & test, **consensus vectors**, `golangci-lint` (only-new-i
 `gofmt` + clean `go mod tidy`, an up-to-date **proto-descriptor** check, and a **blocking
 `govulncheck`**. All tool versions are pinned deliberately. The ruleset also requires a pull
 request, allows **merge commits only**, and blocks force-push and deletion of `main`.
+Merges from a security advisory's private fork bypass CI and the ruleset, so the maintainer
+runs the CI-equivalent `make` targets locally first — see [`REVIEW.md`](REVIEW.md).
 
 ## Hard invariants — do not break
 
@@ -72,13 +78,16 @@ compiles and tests pass:
    return an error (halt the block) rather than committing partial/silently-wrong state.
    No state transition may read wall-clock time, randomness, env vars, or node-local
    config, and must iterate sorted collections (never raw Go map order).
-   See [`REVIEW.md`](REVIEW.md) and [`docs/architecture/adr/`](docs/architecture/adr/).
+   See the determinism rules in
+   [`CONTRIBUTING.md`](CONTRIBUTING.md#determinism-rules-important-for-a-chain) and
+   [`docs/architecture/adr/`](docs/architecture/adr/).
 5. **`utwlt` is the only accounting denom** — no display denom (`twlt`/`TWLT`) may leak
    into amounts.
 
 Consensus-critical paths (`x/coreslot` set/lifecycle, `x/rewards` finalization/emission,
-`app/` wiring, upgrade handlers, genesis import/export, anything affecting deterministic
-state or `ValidatorUpdate`s) are expected to get a maintainer review — see
+`x/mining` finalization/settlement, `app/` wiring, upgrade handlers, genesis
+import/export, anything affecting deterministic state or `ValidatorUpdate`s) are expected
+to get a maintainer review — see
 [`REVIEW.md`](REVIEW.md). That is a process expectation, not a ruleset gate: with a single
 maintainer, required approvals are zero; code-owner routing and required approvals will be
 added once there is more than one maintainer.
@@ -101,16 +110,15 @@ Regenerate instead of editing:
   such tracking issues is allowed and expected.
 - **Commits** are authored under the contributor's own git identity (no AI co-author
   trailers). Keep changes small and single-purpose; the bar for `x/coreslot`, `x/rewards`,
-  and `app/` is high.
+  `x/mining`, and `app/` is high.
 - Fill in the [PR template](.github/PULL_REQUEST_TEMPLATE.md) checklist (tests,
   determinism, fail-closed posture, validator-update provenance, security, migration/docs).
 
 ## Where to look
 
 - [`README.md`](README.md) — architecture, module table, repo layout.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup and contribution flow.
-- [`REVIEW.md`](REVIEW.md) — review process, what the `main` ruleset enforces, and
-  determinism rules.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, contribution flow, and determinism rules.
+- [`REVIEW.md`](REVIEW.md) — review process and what the `main` ruleset enforces.
 - [`SECURITY.md`](SECURITY.md) — private vulnerability reporting and the public testnet
   policy.
 - [`MAINTAINERS.md`](MAINTAINERS.md) — who maintains the project.

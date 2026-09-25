@@ -57,7 +57,7 @@ Notes:
 
 ## Review
 
-See [REVIEW.md](../REVIEW.md).
+See [REVIEW.md](https://github.com/twilight-project/twilight-core/blob/main/REVIEW.md).
 
 - [ ] Multi-model adversarial review pass completed where applicable
 - [ ] Maintainer review requested for consensus-critical paths (a process expectation; the ruleset enforces the required CI checks, not approvals)

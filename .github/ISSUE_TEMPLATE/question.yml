@@ -1,0 +1,22 @@
+name: Question
+description: Ask a question about using, running, or building on Twilight Core
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [documentation](https://twilight-project.github.io/twilight-core/) first.
+
+        **Do not ask about newly discovered security vulnerabilities here** — report them privately via [Private Vulnerability Reporting](https://github.com/twilight-project/twilight-core/security/advisories/new); see [SECURITY.md](https://github.com/twilight-project/twilight-core/blob/main/SECURITY.md). Known testnet limitations are tracked openly as issues.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you are trying to do, what you have already tried, and any relevant docs pages, commands, or version (`twilightd version`). Redact any secrets or private IPs.

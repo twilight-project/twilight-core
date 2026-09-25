@@ -23,19 +23,38 @@ retroactively by:
 - the going-forward automated gates, simulations, and chaos drills, which run against the
   current code regardless of how it was originally merged.
 
-We deliberately do **not** fabricate back-dated issues/PRs or rewrite history. For code,
-the assurance that matters is the *current* state plus the recorded review and tests
-attached to it.
+We deliberately do **not** fabricate back-dated issues/PRs, and we do not rewrite shared
+history. There is one recorded exception: a single history rewrite on 2026-09-25, before the
+repository moved to the `twilight-project` organization, that removed stray development
+artifacts (committed and later deleted) without changing any branch's or tag's source tree —
+see
+[docs/history-rewrite-2026-09.md](docs/history-rewrite-2026-09.md). For code, the assurance
+that matters is the *current* state plus the recorded review and tests attached to it.
 
 ## What the `main` ruleset enforces
 
-These are enforced by GitHub on the `main` branch, not merely expected:
+These are enforced by GitHub on the `main` branch, not merely expected, for every merge
+through a pull request (security-advisory merges are the one exception, described below):
 
 - **Pull requests required** — changes reach `main` only through a pull request.
 - **Required status checks** — the six CI checks below must pass before merge.
 - **Merge commits only** — squash and rebase merges are not allowed, so a reviewed head
   stays identifiable in the history.
 - **No force-push and no deletion** of `main`.
+
+**Exception — security fixes.** A fix for a privately reported vulnerability is developed in
+the security advisory's temporary private fork. GitHub runs no status checks there, CI cannot
+access the fork, and branch protection and rulesets are **not** enforced when the advisory is
+merged. Before merging from an advisory fork, the maintainer therefore runs the
+CI-equivalent checks locally:
+
+```bash
+make build test consensus-vectors lint vet vuln
+make check-vulncheck-pin release-upgrade-faults block-gas-faults check-genesis-faults check-cli-surface
+make fmt tidy proto-descriptor   # then confirm `git status` shows no changes
+```
+
+CI then runs again on `main` after the merge.
 
 **Required approvals are currently zero.** The project has a single maintainer (see
 [`MAINTAINERS.md`](MAINTAINERS.md)), and a sole maintainer cannot approve their own pull
@@ -45,7 +64,8 @@ routing and required approvals will be added once there is more than one maintai
 
 ## Automated gates (required CI checks)
 
-Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (security-advisory
+fixes excepted — see above):
 
 - **build & test** — `go build ./...`, `go test ./...`, plus the harness fault checks
   (release-upgrade rehearsal, block-gas drill, genesis verifier), the vulncheck
@@ -83,7 +103,8 @@ practical with current tooling:
    cases, and unsafe assumptions, treating the change as guilty until proven correct.
 3. **Self-review pass** — an automated self-review before the change is opened, catching
    regressions and style/contract violations.
-4. **PR review** — an automated reviewer on the pull request as the final gate.
+4. **PR review** — an automated review pass on the pull request. It is advisory: it does
+   not block a merge.
 
 This is a strong **defect-removal** layer, but it does **not** replace maintainer
 responsibility, deterministic tests, simulations, operational drills, or independent expert

@@ -1,14 +1,23 @@
 # Contributing to Twilight Core
 
 Thanks for your interest in Twilight Core — a Cosmos SDK / CometBFT Proof-of-Authority
-chain (`x/coreslot` for validator admission, `x/rewards` for the emission economy). The
-standard staking, slashing, gov, mint, and distribution modules are **intentionally
+chain with three custom modules:
+
+- **`x/coreslot`** — validator admission and the validator set.
+- **`x/rewards`** — the emission economy: epoch emission and per-`(slot, epoch)`
+  entitlements.
+- **`x/mining`** — the settlement workflow: a block-driven settlement clock, settlement sets
+  materialized at epoch close, chunked payouts, and finalization releasing the remainder to
+  the recorded payout address. It holds no bank keeper; value moves only through
+  `x/rewards`.
+
+The standard staking, slashing, gov, mint, and distribution modules are **intentionally
 omitted** (not wired into the app) — the validator set and token economics are handled
-entirely by `x/coreslot` and `x/rewards`.
+entirely by these custom modules.
 
 This is a young project under active development. Contributions are welcome; because the
 code is consensus- and value-critical, the bar for changes to `x/coreslot`, `x/rewards`,
-and `app/` is high.
+`x/mining`, and `app/` is high.
 
 ## Before you start
 
@@ -138,7 +147,10 @@ The `main` branch ruleset **enforces** that every change arrives through a pull 
 passes the six required CI checks — build & test, consensus vectors, `golangci-lint`, gofmt
 & tidy, proto descriptor up to date, and `govulncheck` — before it can merge. See
 [`REVIEW.md`](REVIEW.md) for what each check covers, the multi-model review pass we run
-on changes, and the PR checklist.
+on changes, and the PR checklist. The one exception is a fix merged from a security
+advisory's private fork, which bypasses CI and the ruleset; the maintainer runs the
+CI-equivalent `make` targets listed in `REVIEW.md` locally before merging it, and CI runs
+again on `main` afterwards.
 
 Review of consensus-critical changes by a maintainer is a **process expectation**, not
 something the ruleset enforces today: with a single maintainer ([`MAINTAINERS.md`](MAINTAINERS.md)),
@@ -161,10 +173,10 @@ State-machine code must be **deterministic** across nodes:
 
 ## License
 
-Twilight Core is licensed under [Apache-2.0](LICENSE). Under section 5 of that license, any
-contribution you intentionally submit for inclusion is licensed under the same terms, without
-any additional terms or conditions. No commit sign-off or contributor license agreement is
-required.
+Twilight Core is licensed under [Apache-2.0](LICENSE). Under section 5 of that license, unless
+you explicitly state otherwise, any contribution you intentionally submit for inclusion is
+licensed under the same terms, without any additional terms or conditions. No commit sign-off
+or contributor license agreement is required.
 
 ## Code of Conduct
 

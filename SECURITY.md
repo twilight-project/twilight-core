@@ -14,9 +14,11 @@ and appreciate responsible reporting.
 vulnerability.**
 
 Report it privately through **GitHub Private Vulnerability Reporting**, the project's only
-security channel: on this repository, go to **Security → Report a vulnerability**, or open
-<https://github.com/twilight-project/twilight-core/security/advisories/new> directly. This
-creates a private advisory visible only to maintainers. There is no security email address.
+security channel. Use the direct link
+<https://github.com/twilight-project/twilight-core/security/advisories/new>, or choose
+**Report a vulnerability** on the repository's Security tab. This creates a draft advisory
+visible only to you and the repository's administrators and security managers. There is no
+security email address.
 
 Please include as much of the following as possible:
 
@@ -35,7 +37,9 @@ Please include as much of the following as possible:
   reproduce the report, with follow-up questions where needed.
 - Updates while a fix is prepared.
 - **Coordinated disclosure after a fix ships**, once operators have had a reasonable window
-  to upgrade.
+  to upgrade, on a disclosure date agreed with the reporter in the advisory.
+- The embargo is not open-ended: if no fix has shipped within **90 days of
+  acknowledgement**, the reporter and maintainers agree a disclosure date together.
 
 We will credit the reporter in the advisory unless they prefer to remain anonymous.
 
@@ -97,7 +101,8 @@ Twilight Core is **pre-1.0** and runs as a **public testnet**. Security fixes ar
 
 | Version | Status |
 | --- | --- |
-| `v0.3.0` release candidates (`v0.3.0-rc*`) | **Supported** for security fixes |
+| Latest `v0.3.0` release candidate | **Supported** — security fixes ship as a new release candidate |
+| Earlier `v0.3.0` release candidates | Unsupported — upgrade to the latest release candidate |
 | `v0.2.0` | Best effort — superseded by the `v0.3.0` line |
 | `v0.1.0` and older builds | Unsupported |
 
@@ -107,11 +112,20 @@ Releases are published on the
 ## Safe harbor
 
 We will not pursue or support action against anyone for security research conducted in good
-faith under this policy — research that respects the privacy of others, avoids degrading or
-disrupting network service, does not destroy or modify data that is not their own, and is
-reported privately through the channel above without public disclosure before a fix ships.
-If in doubt about whether an activity is covered, ask through the same private channel
-first.
+faith under this policy. Good-faith research:
+
+- respects the privacy of others and accesses only the minimum data needed to demonstrate
+  the issue;
+- avoids degrading or disrupting network service, and does not destroy or modify data that
+  is not the researcher's own;
+- complies with applicable law and does not involve extortion;
+- is reported privately through the channel above, and is not disclosed publicly before the
+  coordinated disclosure date agreed in the advisory.
+
+This safe harbor covers only this project. It cannot authorize testing of third-party
+systems — including nodes run by other operators, GitHub, or hosting providers — which are
+governed by their owners' own terms. If in doubt about whether an activity is covered, ask
+through the same private channel first.
 
 ## Audits and bounty
 
