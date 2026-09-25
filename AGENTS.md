@@ -52,9 +52,11 @@ make localnet-settlement-smoke     # settlement money-movement proof (real payou
 make drills                   # lifecycle + restart-rotation + quorum chaos drills
 ```
 
-CI (`.github/workflows/ci.yml`, required to merge) runs: build & test, `golangci-lint`
-(only-new-issues), `gofmt` + clean `go mod tidy`, an up-to-date **proto-descriptor**
-check, and a **blocking `govulncheck`**. All tool versions are pinned deliberately.
+CI (`.github/workflows/ci.yml`) runs six checks, all **required to merge** by the `main`
+branch ruleset: build & test, **consensus vectors**, `golangci-lint` (only-new-issues),
+`gofmt` + clean `go mod tidy`, an up-to-date **proto-descriptor** check, and a **blocking
+`govulncheck`**. All tool versions are pinned deliberately. The ruleset also requires a pull
+request, allows **merge commits only**, and blocks force-push and deletion of `main`.
 
 ## Hard invariants — do not break
 
@@ -76,7 +78,10 @@ compiles and tests pass:
 
 Consensus-critical paths (`x/coreslot` set/lifecycle, `x/rewards` finalization/emission,
 `app/` wiring, upgrade handlers, genesis import/export, anything affecting deterministic
-state or `ValidatorUpdate`s) require maintainer approval — see [`REVIEW.md`](REVIEW.md).
+state or `ValidatorUpdate`s) are expected to get a maintainer review — see
+[`REVIEW.md`](REVIEW.md). That is a process expectation, not a ruleset gate: with a single
+maintainer, required approvals are zero; code-owner routing and required approvals will be
+added once there is more than one maintainer.
 
 ## Do not hand-edit generated code
 
@@ -89,7 +94,11 @@ Regenerate instead of editing:
 
 - **Issue-first** for anything non-trivial; open a focused PR that references it
   (`Closes #N`). Check `gh issue list` before filing to avoid duplicates.
-- **Security issues:** do not open a public issue — follow [`SECURITY.md`](SECURITY.md).
+- **Security issues:** report a **newly discovered vulnerability** privately through GitHub
+  Private Vulnerability Reporting, never as a public issue — follow
+  [`SECURITY.md`](SECURITY.md). Known testnet limitations are the exception: they are
+  tracked openly as GitHub issues (testnet tokens have no value), and opening or updating
+  such tracking issues is allowed and expected.
 - **Commits** are authored under the contributor's own git identity (no AI co-author
   trailers). Keep changes small and single-purpose; the bar for `x/coreslot`, `x/rewards`,
   and `app/` is high.
@@ -100,7 +109,11 @@ Regenerate instead of editing:
 
 - [`README.md`](README.md) — architecture, module table, repo layout.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup and contribution flow.
-- [`REVIEW.md`](REVIEW.md) — review process and determinism rules.
+- [`REVIEW.md`](REVIEW.md) — review process, what the `main` ruleset enforces, and
+  determinism rules.
+- [`SECURITY.md`](SECURITY.md) — private vulnerability reporting and the public testnet
+  policy.
+- [`MAINTAINERS.md`](MAINTAINERS.md) — who maintains the project.
 - [`docs/architecture/adr/`](docs/architecture/adr/) — design decisions (CoreSlot PoA,
   rewards emission).
 - [`docs/testing/`](docs/testing/) — validation summary, drills, simulations.

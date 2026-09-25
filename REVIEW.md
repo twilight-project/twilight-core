@@ -1,9 +1,9 @@
 # Review Process
 
-Twilight Core is consensus- and value-critical, so every change must be reviewed before it
-lands. This document describes how — both the automated gates and the multi-model
-adversarial review used heavily during early development and, going forward, alongside
-maintainer review.
+Twilight Core is consensus- and value-critical, so every change is reviewed before it
+lands. This document describes how — what the `main` branch ruleset enforces, the automated
+gates, and the multi-model adversarial review used heavily during early development and,
+going forward, alongside maintainer review.
 
 ## Process history (full transparency)
 
@@ -27,13 +27,34 @@ We deliberately do **not** fabricate back-dated issues/PRs or rewrite history. F
 the assurance that matters is the *current* state plus the recorded review and tests
 attached to it.
 
-## Automated gates (CI — required to merge)
+## What the `main` ruleset enforces
+
+These are enforced by GitHub on the `main` branch, not merely expected:
+
+- **Pull requests required** — changes reach `main` only through a pull request.
+- **Required status checks** — the six CI checks below must pass before merge.
+- **Merge commits only** — squash and rebase merges are not allowed, so a reviewed head
+  stays identifiable in the history.
+- **No force-push and no deletion** of `main`.
+
+**Required approvals are currently zero.** The project has a single maintainer (see
+[`MAINTAINERS.md`](MAINTAINERS.md)), and a sole maintainer cannot approve their own pull
+request, so requiring an approval would block every change. Maintainer review is therefore a
+process expectation (see [Human review](#human-review)), not a ruleset guarantee. Code-owner
+routing and required approvals will be added once there is more than one maintainer.
+
+## Automated gates (required CI checks)
 
 Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
-- **build & test** — `go build ./...`, `go test ./...`
+- **build & test** — `go build ./...`, `go test ./...`, plus the harness fault checks
+  (release-upgrade rehearsal, block-gas drill, genesis verifier), the vulncheck
+  toolchain-pin check, and the CLI-surface check in the same job
+- **consensus vectors** — conformance against the normative protocol vector packs
 - **golangci-lint** — static analysis (`.golangci.yml`)
 - **gofmt & tidy** — formatting and a clean `go mod tidy`
+- **proto descriptor up to date** — the committed descriptor set matches a pinned-`protoc`
+  regeneration
 - **govulncheck** — dependency vulnerability scan; **blocking** (a newly reachable
   advisory fails CI; advisories in modules the code does not call do not)
 
@@ -73,18 +94,22 @@ security audit** (see [`SECURITY.md`](SECURITY.md)).
 
 ## Human review
 
-While the project is small, maintainer approval is required for consensus-critical changes.
-Consensus-critical areas include:
+Consensus-critical changes are expected to receive a **maintainer review**, alongside the
+adversarial review above, before they merge. While there is a single maintainer this is a
+process commitment rather than an enforced approval (see
+[What the `main` ruleset enforces](#what-the-main-ruleset-enforces)). Consensus-critical
+areas include:
 
 - `x/coreslot` validator-set and lifecycle logic;
 - `x/rewards` finalization, emission, and economic accounting;
+- `x/mining` finalization and settlement;
 - `app/` wiring;
 - upgrade handlers;
 - genesis import/export behavior;
 - any code path that can affect deterministic state transitions or `ValidatorUpdate`s.
 
-As the contributor base grows, branch protection will require at least one independent
-approving review for these paths.
+Once there is more than one maintainer, the ruleset will route these paths to code owners
+and require at least one approving review from someone other than the author.
 
 ## Reviewer checklist
 

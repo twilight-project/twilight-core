@@ -10,12 +10,13 @@ and appreciate responsible reporting.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue, pull request, or discussion for a security vulnerability.**
+**Do not open a public issue, pull request, or discussion for a newly discovered
+vulnerability.**
 
-Report vulnerabilities privately through **GitHub Private Vulnerability Reporting**: on this
-repository, go to **Security → Report a vulnerability**. This opens a private advisory
-visible only to maintainers. (A dedicated security contact address and PGP key may be added
-as the project grows.)
+Report it privately through **GitHub Private Vulnerability Reporting**, the project's only
+security channel: on this repository, go to **Security → Report a vulnerability**, or open
+<https://github.com/twilight-project/twilight-core/security/advisories/new> directly. This
+creates a private advisory visible only to maintainers. There is no security email address.
 
 Please include as much of the following as possible:
 
@@ -29,14 +30,28 @@ Please include as much of the following as possible:
 
 ## What to expect
 
-- Acknowledgement within a few business days.
-- Initial assessment and severity triage.
-- Follow-up questions where needed to reproduce or validate the report.
-- Regular updates while a fix is prepared.
-- Coordinated disclosure once a fix is released and operators have had a reasonable window
+- **Acknowledgement within 3 business days.**
+- **Initial triage within 10 business days** — a severity assessment and whether we can
+  reproduce the report, with follow-up questions where needed.
+- Updates while a fix is prepared.
+- **Coordinated disclosure after a fix ships**, once operators have had a reasonable window
   to upgrade.
 
 We will credit the reporter in the advisory unless they prefer to remain anonymous.
+
+## Public testnet policy
+
+Twilight Core currently runs as a **public testnet whose tokens have no value**. On that
+basis:
+
+- **Known limitations** of the testnet are tracked **openly as GitHub issues**, so that
+  their resolution is visible and verifiable. Opening or discussing such a tracking issue is
+  expected, not a disclosure violation.
+- **Newly discovered vulnerabilities** must still be reported **privately** through Private
+  Vulnerability Reporting, even on the testnet. If you are unsure whether something is
+  already a known, publicly tracked limitation, report it privately.
+- **Before any mainnet or other real-value network**, every open security-relevant issue is
+  reviewed and resolved.
 
 ## Scope
 
@@ -55,9 +70,9 @@ A security issue in this repository is in scope if it can affect:
   sensitive operational data.
 
 Examples of in-scope areas: `x/coreslot`; `x/rewards` (reward, emission, and economic
-accounting); `app/` wiring; keeper logic; message handlers; BeginBlock and EndBlock
-handlers; genesis handling; validator-set update paths; and security-sensitive CLI, REST,
-and gRPC surfaces.
+accounting); `x/mining`; `app/` wiring; keeper logic; message handlers; BeginBlock and
+EndBlock handlers; genesis handling; validator-set update paths; and security-sensitive CLI,
+REST, and gRPC surfaces.
 
 ## Out of scope
 
@@ -65,7 +80,7 @@ The following are generally out of scope:
 
 - third-party infrastructure not controlled by the project;
 - attacks requiring control of a reporter's own node, host, or a non-default deployment;
-- public devnet operational-host issues that do not indicate a vulnerability in Twilight
+- public testnet operational-host issues that do not indicate a vulnerability in Twilight
   Core;
 - generic denial-of-service against a single unhardened node where no protocol or
   implementation vulnerability is demonstrated;
@@ -77,16 +92,33 @@ If uncertain, report privately rather than opening a public issue.
 
 ## Supported versions
 
-Twilight Core is pre-1.0 and under active development. Security fixes target the latest
-`main`, which is the trunk; there is no long-lived integration branch. A formal
-supported-version matrix will accompany the first tagged release line.
+Twilight Core is **pre-1.0** and runs as a **public testnet**. Security fixes are made on
+`main` (the trunk) and shipped in the supported release line:
+
+| Version | Status |
+| --- | --- |
+| `v0.3.0` release candidates (`v0.3.0-rc*`) | **Supported** for security fixes |
+| `v0.2.0` | Best effort — superseded by the `v0.3.0` line |
+| `v0.1.0` and older builds | Unsupported |
+
+Releases are published on the
+[releases page](https://github.com/twilight-project/twilight-core/releases).
+
+## Safe harbor
+
+We will not pursue or support action against anyone for security research conducted in good
+faith under this policy — research that respects the privacy of others, avoids degrading or
+disrupting network service, does not destroy or modify data that is not their own, and is
+reported privately through the channel above without public disclosure before a fix ships.
+If in doubt about whether an activity is covered, ask through the same private channel
+first.
 
 ## Audits and bounty
 
-Twilight Core undergoes continuous internal review, including automated CI and multi-model
-adversarial review (see [`REVIEW.md`](REVIEW.md)). This review process is **not** a
-substitute for independent security assessment.
+Twilight Core has **not been externally audited**. It undergoes continuous internal review,
+including automated CI and multi-model adversarial review (see [`REVIEW.md`](REVIEW.md));
+that process is **not** a substitute for an independent security assessment.
 
-An independent third-party security audit and a bug-bounty program are planned before
-mainnet. This section will link the audit report, bounty scope, severity framework, and
-reward terms when available.
+There is **no bug bounty** at present. An independent third-party security audit is planned
+before any mainnet or real-value network; this section will link the audit report, and any
+bounty scope and terms, when available.

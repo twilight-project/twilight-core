@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Do not report security vulnerabilities here** — follow [SECURITY.md](../blob/main/SECURITY.md) for private disclosure.
+        **Do not report newly discovered security vulnerabilities here** — report them privately via [Private Vulnerability Reporting](https://github.com/twilight-project/twilight-core/security/advisories/new); see [SECURITY.md](https://github.com/twilight-project/twilight-core/blob/main/SECURITY.md). Known testnet limitations are tracked openly as issues.
   - type: textarea
     id: what-happened
     attributes:
@@ -44,6 +44,7 @@ body:
       options:
         - x/coreslot (consensus / validator set)
         - x/rewards (emission / claims)
+        - x/mining
         - app / wiring
         - CLI / REST / gRPC
         - tooling / scripts / docs
