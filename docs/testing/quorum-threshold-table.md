@@ -29,6 +29,6 @@ and tolerance depends on the count alone.
 
 ## Reading it for a deployment
 
-A two-validator network — the current devnet shape — tolerates nothing: either node
-stopping halts the chain until it returns. That is correct behaviour rather than a
-fault, and it is worth planning for as a normal event.
+A two-validator network tolerates nothing: either node stopping halts the chain
+until it returns. That is correct behaviour rather than a fault, and it is worth
+planning for as a normal event.

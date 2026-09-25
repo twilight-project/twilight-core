@@ -36,11 +36,18 @@ SOAK_DURATION="${SOAK_DURATION:-$(( SOAK_EPOCHS * ${EPOCH_LENGTH:-360} + 300 ))}
 # a fast block time instead of a short epoch — block time is node-local
 # configuration and is not a protocol value.
 EPOCH_LENGTH="${EPOCH_LENGTH:-360}"
+# Expected per-block emission in utwlt, used only to compute the accounting the run
+# asserts; it must match the genesis initial_block_subsidy (the default is 416190).
 SUBSIDY="${SUBSIDY:-416190}"
+# off = strip every genesis bank balance and supply (a zero-premine chain).
 PREMINE="${PREMINE:-on}"
+# on = once epoch 4 has finalized, kill and restart node3 and require it to catch up and agree.
 CHAOS="${CHAOS:-on}"
+# on = once epoch 2 has finalized, one emergency pause/resume cycle (emergency authority).
 PAUSE_CYCLE="${PAUSE_CYCLE:-on}"
+# on = once epoch 3 has finalized, one authority param update that must queue, then activate.
 PARAM_DRILL="${PARAM_DRILL:-on}"
+# Seconds without height progress before the run is declared halted.
 HALT_TIMEOUT="${HALT_TIMEOUT:-30}"
 RESUME="${RESUME:-off}"   # on = continue the chain already in $NET (no wipe/init)
 KEYRING=(--keyring-backend test)

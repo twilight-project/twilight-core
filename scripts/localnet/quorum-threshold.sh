@@ -202,9 +202,9 @@ echo "remaining set still commits blocks."
   echo
   echo "## Reading it for a deployment"
   echo
-  echo "A two-validator network — the current devnet shape — tolerates nothing: either node"
-  echo "stopping halts the chain until it returns. That is correct behaviour rather than a"
-  echo "fault, and it is worth planning for as a normal event."
+  echo "A two-validator network tolerates nothing: either node stopping halts the chain"
+  echo "until it returns. That is correct behaviour rather than a fault, and it is worth"
+  echo "planning for as a normal event."
 } > "$REPORT"
 echo
 echo "table written to ${REPORT#$ROOT/}"

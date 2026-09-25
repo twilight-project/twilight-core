@@ -64,6 +64,7 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `SelectionParamsVersions` | `/twilight/mining/v1/selection-params-versions` | `pagination.*` (query) | `QuerySelectionParamsVersionsResponse` | `curl $REST/twilight/mining/v1/selection-params-versions` | 200 |
 | `SettlementParamsVersion` | `/twilight/mining/v1/settlement-params-versions/{version}` | `version` (path, uint64) | `QuerySettlementParamsVersionResponse` | `curl $REST/twilight/mining/v1/settlement-params-versions/1` | 200; 404 if no such version |
 | `SettlementParamsVersions` | `/twilight/mining/v1/settlement-params-versions` | `pagination.*` (query) | `QuerySettlementParamsVersionsResponse` | `curl $REST/twilight/mining/v1/settlement-params-versions` | 200 |
+| `SettlementParamsForEpoch` | `/twilight/mining/v1/settlement-params-for-epoch/{epoch}` | `epoch` (path, uint64) | `QuerySettlementParamsForEpochResponse` | `curl $REST/twilight/mining/v1/settlement-params-for-epoch/4` | 200; 400 for `0` |
 | `TargetEpochInterpretation` | `/twilight/mining/v1/target-epochs/{target_epoch}` | `target_epoch` (path, uint64) | `QueryTargetEpochInterpretationResponse` | `curl $REST/twilight/mining/v1/target-epochs/4` | 200; 400 for `0` |
 | `ValidateEconomicAddress` | `/twilight/mining/v1/economic-address` | `address` (**query**, string) | `QueryValidateEconomicAddressResponse` | `curl "$REST/twilight/mining/v1/economic-address?address=twilight1..."` | 200 (including for a rejected address) |
 
