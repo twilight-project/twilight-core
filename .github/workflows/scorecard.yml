@@ -7,9 +7,13 @@ name: Scorecard supply-chain security
 # Scorecard only analyses the default branch, so this does not run on pull
 # requests. With publish_results enabled the Scorecard service verifies this
 # workflow's shape, so keep it minimal: no workflow-level write permissions, no
-# job-level env/defaults/services/container, and only the steps below.
+# workflow- or job-level env/defaults, no services/containers, and only the
+# steps below.
 on:
-  # Re-score when branch protection changes (the Branch-Protection check).
+  # Part of Scorecard's recommended trigger set. It fires only on classic
+  # branch-protection rule changes; main is protected by a repository ruleset,
+  # which has no workflow trigger, so ruleset changes are re-scored by the next
+  # push to main or the weekly schedule instead.
   branch_protection_rule:
   schedule:
     - cron: "41 5 * * 2"
@@ -35,6 +39,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # Docker action: its action.yaml runs docker://ghcr.io/ossf/scorecard-action:<version>,
+      # a mutable image tag, so this commit pin does not pin the executed image. That is
+      # upstream's design and the publishing verifier allows no other layout; a Dependabot
+      # bump of this pin moves the image tag with it.
       - name: Run analysis
         uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:

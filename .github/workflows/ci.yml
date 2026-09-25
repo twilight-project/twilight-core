@@ -129,7 +129,7 @@ jobs:
           cache: true
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './website/*'))
+          unformatted=$(find . -name '*.go' -not -path './website/*' -exec gofmt -l {} +)
           if [ -n "$unformatted" ]; then
             echo "::error::These files need gofmt:"; echo "$unformatted"; exit 1
           fi

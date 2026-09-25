@@ -10,8 +10,11 @@ on:
 # deploy job, so the build job — which also runs on pull requests — never holds them.
 permissions:
   contents: read
+# Serialise runs per ref only, so a pull-request build can never displace a
+# pending run on main (a concurrency group keeps just one pending run). The
+# shared "pages" group lives on the deploy job alone, which only runs on main.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   build:
@@ -38,6 +41,9 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
