@@ -126,10 +126,10 @@ from what settlement actually does, without anything failing loudly.
 ### Notes
 - **`ActiveCoreSlots` uses `/active-slots`, not `/slots/active`.** A `/slots/active`
   path collides with `/slots/{slot_id}` and is parsed as `slot_id="active"` → HTTP 400.
-  The path was changed when REST was wired (API-0/1/2); the gRPC method name is
+  The path was chosen when REST was wired; the gRPC method name is
   unchanged. No prior REST consumer existed (REST was never served before this).
 - `PendingKeyRotations`, `LastAppliedValidators`, `ReservedConsensusAddress`,
-  `RewardWeight` had no `google.api.http` annotation before this work and were
+  `RewardWeight` had no `google.api.http` annotation before REST was wired and were
   gRPC-only; they are now REST-exposed.
 - **`RewardWeight` is metadata-only in v1 — do not build payout logic on it.** The
   `OperatorRewardWeight` fields (`base_weight`, `uptime_weight`, `performance_weight`,

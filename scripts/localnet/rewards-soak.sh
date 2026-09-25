@@ -12,8 +12,8 @@ set -uo pipefail
 # emission it observes stays in the module account for the whole run. That is
 # what the accounting identity below asserts.
 #
-# Same harness, two durations: short+supervised locally; long+unattended on cloud.
-# See docs/research/x-rewards-soak-harness-design.md.
+# Same harness, two durations: short and supervised on a workstation, or long and
+# unattended on a dedicated host.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/twilightd}"

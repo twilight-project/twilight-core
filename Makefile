@@ -281,8 +281,8 @@ localnet-rewards-smoke: localnet-rewards-epoch-smoke
 # pause/param/restart drills. Sized in EPOCHS, not seconds: the ratified 360-block
 # minimum epoch takes minutes on a localnet, and a seconds-based budget could finish
 # without closing one — proving nothing while reporting success.
-# Env-tunable (SOAK_EPOCHS, SOAK_DURATION as a safety cap, EPOCH_LENGTH, PREMINE, CHAOS, ...). See
-# docs/research/x-rewards-soak-harness-design.md.
+# Env-tunable (SOAK_EPOCHS, SOAK_DURATION as a safety cap, EPOCH_LENGTH, PREMINE, CHAOS, ...);
+# each knob is documented where scripts/localnet/rewards-soak.sh declares it.
 localnet-rewards-soak:
 	./scripts/localnet/rewards-soak.sh
 

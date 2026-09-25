@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Smoke test for the Twilight Swagger/OpenAPI surface (API-3).
+# Smoke test for the Twilight Swagger/OpenAPI surface.
 #
 # Verifies that, when api.swagger=true, the app serves the Swagger UI and the merged
 # OpenAPI spec, that the spec is valid JSON covering both the custom twilight modules
-# and the enabled generic Cosmos modules, and that the REST routes from API-0..2 still
+# and the enabled generic Cosmos modules, and that the custom REST routes still
 # work. Standard modules Twilight does not run (staking/gov/mint/distribution) are not
 # required and never fail the run.
 #
 # Usage:
 #   ./scripts/smoke-swagger-api.sh
-#   BASE_REST=http://16.192.99.123:1317 ./scripts/smoke-swagger-api.sh
+#   BASE_REST=http://<node-host>:1317 ./scripts/smoke-swagger-api.sh
 set -uo pipefail
 
 BASE_REST="${BASE_REST:-http://localhost:1317}"
@@ -31,7 +31,7 @@ if [[ "$(code "$BASE_REST/cosmos/base/tendermint/v1beta1/node_info")" == "000" ]
   echo "This smoke runs against a LIVE node with [api] enable=true and swagger=true." >&2
   echo "Start a localnet (see scripts/smoke-api-surface.sh preflight) and also set" >&2
   echo "  sed -i.bak '/^\\[api\\]/,/^\\[/ s/^swagger = false/swagger = true/' node0/config/app.toml" >&2
-  echo "or point BASE_REST at a running node, e.g. BASE_REST=http://16.192.99.123:1317" >&2
+  echo "or point BASE_REST at a running node, e.g. BASE_REST=http://<node-host>:1317" >&2
   exit 2
 fi
 

@@ -1,9 +1,10 @@
-# Twilight Chain → Explorer/Indexer Integration Handoff (ground truth)
+# Explorer and indexer integration guide
 
-Purpose: a **fact-checked** snapshot of the actual Twilight chain implementation, so an
-explorer/indexer design can be validated against reality (not memory or projection).
-Every claim here was verified against the code in `twilight-core` (Cosmos SDK v0.53.7 /
-CometBFT). Use it as the checklist a reviewer holds the explorer design up against.
+What a block explorer or indexer needs to know about the Twilight chain: which API
+surfaces exist, how validators are sourced, how to decode transactions, which events are
+emitted, and the query behaviors that differ from a standard Cosmos SDK chain. It
+describes the code in this repository (Cosmos SDK v0.53.7 / CometBFT); §9 condenses it
+into a checklist to hold an explorer or indexer design against.
 
 > The single biggest source of explorer bugs on this chain: **it is CoreSlot-PoA +
 > rewards + mining only — there is NO staking/gov/mint/distribution.** Anything in the
@@ -20,7 +21,9 @@ CometBFT). Use it as the checklist a reviewer holds the explorer design up again
 - **NOT present:** staking, gov, mint, distribution, slashing, IBC, group, feegrant,
   authz. Their REST/gRPC routes return **501 Not Implemented** — this is by design, not an
   outage. An explorer must not treat 501 on those as an error or a chain it can't index.
-- Devnet chain-id: `twilight-devnet-1`. Localnet: `twilight-localnet-1`.
+- The chain-id is chosen per network at genesis; read it from CometBFT `/status`
+  (`node_info.network`) rather than hard-coding it. The localnet scripts use
+  `twilight-localnet-1`.
 
 ## 2. Validators come from x/coreslot, NOT staking
 
@@ -55,10 +58,10 @@ This is the most important architectural fact for an indexer.
 assume `:1317` is reachable on a given deployment — confirm it, and keep a gRPC path
 available. gRPC (`[grpc] enable`) and gRPC-web are enabled by default.
 
-**Live devnet (box 2):** `http://16.192.99.123:{1317,26657}`, gRPC `:9090`. Swagger at
-`http://16.192.99.123:1317/swagger/`. REST custom routes return **200** (gateway shipped).
-NOTE: older devnet snapshots returned 501 on custom routes — that was the pre-gateway
-binary; the current binary serves them.
+With REST enabled, the custom `twilight/*` routes are served by the gRPC gateway and
+return **200** for valid requests. A **501** on one of the routes listed in §5 means the
+node is running a binary that predates the REST gateway; the retired claim routes in §6
+answer 501 by design.
 
 ## 4. Decoding transactions (the explorer's raw-tx fallback)
 
@@ -311,7 +314,8 @@ in the node.
   active-block participation, creating one `SlotEntitlement` per (slot, epoch) that is
   held until settlement releases it.
 - Module accounting is queryable via `module-balances` (rewards + fee-pool balances).
-- Premine is configurable (devnet may have funded accounts; the soak ran zero-premine).
+- Premine is a genesis choice: a network may start with funded accounts or with none, so
+  do not assume either.
 
 ## 8. What the explorer can rely on as data sources
 
@@ -326,7 +330,7 @@ in the node.
   `coreslottypes.RegisterInterfaces` on the codec; the equivalent for a TS client is
   loading `twilight-descriptors.pb`).
 
-## 9. Review checklist (hold the explorer design against these)
+## 9. Integration checklist
 
 1. Does it avoid assuming staking/gov/mint/distribution exist? (validators via CoreSlot)
 2. Does it decode custom Msgs via the descriptor set or the REST tx service (not hand-rolled
@@ -339,7 +343,7 @@ in the node.
 7. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
    reflect the N-of-N PoA liveness model?
 
-## 10. Source-of-truth files in the chain repo (for the agent to cite)
+## 10. Source-of-truth files in this repository
 
 - `docs/reference/rest-routes.md` — full REST route table
 - `docs/reference/swagger.md` + `app/openapi/twilight.swagger.json` — OpenAPI of the surface
