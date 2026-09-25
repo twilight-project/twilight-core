@@ -1,9 +1,10 @@
-# Twilight Chain → Explorer/Indexer Integration Handoff (ground truth)
+# Explorer and indexer integration guide
 
-Purpose: a **fact-checked** snapshot of the actual Twilight chain implementation, so an
-explorer/indexer design can be validated against reality (not memory or projection).
-Every claim here was verified against the code in `twilight-core` (Cosmos SDK v0.53.7 /
-CometBFT). Use it as the checklist a reviewer holds the explorer design up against.
+What a block explorer or indexer needs to know about the Twilight chain: which API
+surfaces exist, how validators are sourced, how to decode transactions, which events are
+emitted, and the query behaviors that differ from a standard Cosmos SDK chain. It
+describes the code in this repository (Cosmos SDK v0.53.7 / CometBFT); §9 condenses it
+into a checklist to run an explorer or indexer against.
 
 > The single biggest source of explorer bugs on this chain: **it is CoreSlot-PoA +
 > rewards + mining only — there is NO staking/gov/mint/distribution.** Anything in the
@@ -20,7 +21,9 @@ CometBFT). Use it as the checklist a reviewer holds the explorer design up again
 - **NOT present:** staking, gov, mint, distribution, slashing, IBC, group, feegrant,
   authz. Their REST/gRPC routes return **501 Not Implemented** — this is by design, not an
   outage. An explorer must not treat 501 on those as an error or a chain it can't index.
-- Devnet chain-id: `twilight-devnet-1`. Localnet: `twilight-localnet-1`.
+- The chain-id is chosen per network at genesis; read it from CometBFT `/status`
+  (`node_info.network`) rather than hard-coding it. The localnet scripts use
+  `twilight-localnet-1`.
 
 ## 2. Validators come from x/coreslot, NOT staking
 
@@ -55,10 +58,10 @@ This is the most important architectural fact for an indexer.
 assume `:1317` is reachable on a given deployment — confirm it, and keep a gRPC path
 available. gRPC (`[grpc] enable`) and gRPC-web are enabled by default.
 
-**Live devnet (box 2):** `http://16.192.99.123:{1317,26657}`, gRPC `:9090`. Swagger at
-`http://16.192.99.123:1317/swagger/`. REST custom routes return **200** (gateway shipped).
-NOTE: older devnet snapshots returned 501 on custom routes — that was the pre-gateway
-binary; the current binary serves them.
+With REST enabled, the custom `twilight/*` routes are served by the gRPC gateway and
+return **200** for valid requests. The gateway answers **501** for any path it does not
+register, so a 501 means the node runs a binary that does not serve that route: an
+older release, a module this chain omits (§1), or a retired route (§6).
 
 ## 4. Decoding transactions (the explorer's raw-tx fallback)
 
@@ -133,8 +136,9 @@ Two supported decode paths:
    Decode flow: `TxRaw → TxBody(body_bytes) → messages[] (Any) →` resolve each `type_url`.
    `docs/proto/twilight-msg-type-urls.json` is the machine-readable manifest;
    `docs/proto/README.md` has a drop-in protobufjs `decodeRawTx`.
-   - **There is no buf / Telescope / ts-proto in the chain repo** — only the descriptor set.
-     If the explorer design assumes generated TS bindings exist upstream, that's wrong today.
+   - **There is no buf / Telescope / ts-proto output in this repository** — only the
+     descriptor set. A TypeScript client generates its own bindings from it or decodes
+     dynamically; there are no upstream TS bindings to depend on.
 
 ## 5. REST / query surface (exact)
 
@@ -154,7 +158,8 @@ Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on
 `distribution-mode-versions`, `distribution-mode-versions/{version}`,
 `selection-params-versions`, `selection-params-versions/{version}`,
 `settlement-params-versions`, `settlement-params-versions/{version}`,
-`target-epochs/{target_epoch}`, `economic-address?address=…`.
+`settlement-params-for-epoch/{epoch}`, `target-epochs/{target_epoch}`,
+`economic-address?address=…`.
 
 ### The consumer read contract (two routes worth reading before you build)
 
@@ -195,7 +200,7 @@ including the derived settlement values (`participant_distribution_ceiling`,
 height for a whole reconciliation pass; mixing a pinned read with an unpinned one mixes
 two moments into one decision.
 
-Query footguns the design MUST account for:
+Query behaviors an integration must account for:
 - **`active-slots` not `slots/active`** — the latter collides with `slots/{slot_id}` and
   returns 400 (parsed as `slot_id="active"`).
 - **`EpochReward` (`epochs/{n}`) returns 404** for an epoch that isn't finalized yet.
@@ -248,9 +253,9 @@ worker must be able to lose every event, restart, read committed state, and dete
 exactly what to do next. Every attribute above is also readable from state, so an indexer
 that misses events can rebuild from the queries in §5 rather than losing the settlement.
 
-If the indexer's event projections reference any event name NOT in these three lists (e.g.
-`reward_distributed`, `validator_jailed`, staking/gov events), that's a design error —
-those events do not exist.
+Only the event names in these three lists are emitted. Names common on other Cosmos
+chains (e.g. `reward_distributed`, `validator_jailed`, staking/gov events) do not exist
+here, so an event projection keyed on them never fires.
 
 ### V2 breaking change — rotation-cancellation event renamed
 
@@ -311,7 +316,8 @@ in the node.
   active-block participation, creating one `SlotEntitlement` per (slot, epoch) that is
   held until settlement releases it.
 - Module accounting is queryable via `module-balances` (rewards + fee-pool balances).
-- Premine is configurable (devnet may have funded accounts; the soak ran zero-premine).
+- Premine is a genesis choice: a network may start with funded accounts or with none, so
+  do not assume either.
 
 ## 8. What the explorer can rely on as data sources
 
@@ -319,14 +325,15 @@ in the node.
   `/tx?hash=`. Or REST `cosmos/tx/v1beta1` (decodes Msgs).
 - **Generic state:** `cosmos/bank` (supply, balances), `cosmos/auth` (accounts),
   `cosmos/base/tendermint` (blocks, validatorsets), `cosmos/base/node`.
-- **Custom state:** the rewards + coreslot queries in §5 (REST or gRPC).
-- A reference Go reader exists in the chain repo: `tools/dashboard` reuses the generated
-  query clients + `TxConfig`/codec over RPC and decodes all custom modules — a working
-  example of correct decoding (note: it had to call `rewardstypes.RegisterInterfaces` +
-  `coreslottypes.RegisterInterfaces` on the codec; the equivalent for a TS client is
-  loading `twilight-descriptors.pb`).
+- **Custom state:** the rewards, coreslot and mining queries in §5 (REST or gRPC).
+- A reference Go reader exists in this repository: `tools/dashboard` reuses the generated
+  query clients + `TxConfig`/codec over RPC and decodes the coreslot and rewards
+  messages — a working example of correct decoding (note: it has to call
+  `rewardstypes.RegisterInterfaces` + `coreslottypes.RegisterInterfaces` on the codec, and
+  a reader that also decodes settlement registers the mining types the same way; the
+  equivalent for a TS client is loading `twilight-descriptors.pb`).
 
-## 9. Review checklist (hold the explorer design against these)
+## 9. Integration checklist
 
 1. Does it avoid assuming staking/gov/mint/distribution exist? (validators via CoreSlot)
 2. Does it decode custom Msgs via the descriptor set or the REST tx service (not hand-rolled
@@ -339,7 +346,7 @@ in the node.
 7. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
    reflect the N-of-N PoA liveness model?
 
-## 10. Source-of-truth files in the chain repo (for the agent to cite)
+## 10. Source-of-truth files in this repository
 
 - `docs/reference/rest-routes.md` — full REST route table
 - `docs/reference/swagger.md` + `app/openapi/twilight.swagger.json` — OpenAPI of the surface

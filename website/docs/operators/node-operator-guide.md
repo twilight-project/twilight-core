@@ -83,6 +83,102 @@ scripts/localnet/start.sh
 scripts/localnet/stop.sh
 ```
 
+## Joining an existing network
+
+A full node on a network someone else runs needs three things from that network's
+operators: its **chain-id**, its **genesis document** (a published file, or the
+`/genesis` route of one of its nodes), and at least one **peer address** of the form
+`<node-id>@<host>:26656`.
+
+```bash
+twilightd init <moniker> --chain-id <chain-id>
+
+# Install the network's genesis: the published file...
+curl -fsSL <genesis-url> -o ~/.twilightd/config/genesis.json
+# ...or fetched from one of its nodes:
+# curl -s http://<rpc-host>:26657/genesis | jq '.result.genesis' > ~/.twilightd/config/genesis.json
+
+jq -r '.chain_id' ~/.twilightd/config/genesis.json   # must print <chain-id>
+twilightd validate-genesis ~/.twilightd/config/genesis.json
+
+# Peer with the network (GNU sed shown):
+sed -i 's#^persistent_peers =.*#persistent_peers = "<node-id>@<host>:26656"#' \
+  ~/.twilightd/config/config.toml
+```
+
+Then start the node. For anything longer-lived than a test, run it under a service
+manager so it restarts after a crash and survives a reboot. First install the binary
+built above where the unit expects it (from the repository root):
+
+```bash
+sudo install -m 0755 build/twilightd /usr/local/bin/twilightd
+```
+
+A minimal systemd unit:
+
+```ini
+# /etc/systemd/system/twilightd.service
+[Unit]
+Description=Twilight full node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=<user>
+ExecStart=/usr/local/bin/twilightd start
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now twilightd
+journalctl -u twilightd -f
+```
+
+The node is joined when it reports `catching_up: false` and its height tracks the
+network's:
+
+```bash
+curl -s http://localhost:26657/status \
+  | jq '.result.sync_info | {height: .latest_block_height, catching_up}'
+```
+
+**Becoming a validator.** Validators are admitted by the chain authority, not by
+stake. Give the authority your operator address, a payout address, a settlement
+address (any of the three may be the same account), your consensus public key
+(`twilightd comet show-validator | jq -r .key`) and a moniker. Once the authority
+registers and activates the slot, the running node starts validating without a
+restart; `/status` then shows a non-zero `validator_info.voting_power`.
+
+**Re-joining after a re-genesis.** When a network restarts from a new genesis, stop
+the node and run `twilightd comet unsafe-reset-all --home ~/.twilightd`. This wipes
+the chain databases, zeroes `data/priv_validator_state.json` and deletes the address
+book (`config/addrbook.json`), but keeps your keys and configuration, so
+`persistent_peers` in `config.toml` still names your peers. Then replace
+`config/genesis.json` with the new document and start again.
+
+If the new genesis also carries a new chain-id, update `chain-id` in
+`config/client.toml`. Nothing rewrites it after the first `init`, and the CLI signs
+transactions for the chain-id that file names unless `--chain-id` is passed:
+
+```bash
+sed -i 's#^chain-id = .*#chain-id = "<new-chain-id>"#' ~/.twilightd/config/client.toml
+```
+
+**`twilightd init` does not reset existing configuration.** Run over a home that
+already has an `app.toml` and `config.toml`, it keeps their values and updates only
+the moniker, so settings from an earlier deployment (pruning, `min-retain-blocks`, API
+enablement, peers) carry over silently. Review them after re-initialising a home
+directory. It also leaves `client.toml` alone (see above), and it refuses to run while
+`config/genesis.json` exists (`genesis.json file already exists`) unless you pass
+`--overwrite`, which replaces that file with a fresh default genesis. Install the
+network's genesis again afterwards.
+
 ## Check status and agreement
 
 ```bash
@@ -106,7 +202,7 @@ rewards module is fail-closed and will halt the block on a finalization fault (s
 
 | Symptom | Check |
 |---|---|
-| Node won't start | genesis validity (`twilightd validate-genesis` if available); port conflicts |
+| Node won't start | genesis validity (`twilightd validate-genesis`); port conflicts |
 | Halts at a height with EndBlock error | rewards finalization fault — inspect logs; this is fail-closed by design |
 | App-hash divergence vs peers | **critical** — stop and investigate a possible fork |
 | Empty validator set at InitChain | genesis must include at least one active CoreSlot |

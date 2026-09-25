@@ -4,7 +4,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 
 // Twilight Chain documentation site.
 // Fresh, self-contained Docusaurus project. All content is authored from the
-// twilight-core repository (code + phase reports). Visual language only evokes the
+// twilight-core repository (code and its published docs). Visual language only evokes the
 // Twilight brand; nothing is copied from other Twilight sites.
 const config: Config = {
   title: "Twilight Chain Docs",

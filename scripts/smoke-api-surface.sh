@@ -11,8 +11,8 @@
 #
 # Usage:
 #   ./scripts/smoke-api-surface.sh
-#   BASE_REST=http://16.192.99.123:1317 BASE_GRPC=16.192.99.123:9090 \
-#     BASE_RPC=http://16.192.99.123:26657 ./scripts/smoke-api-surface.sh
+#   BASE_REST=http://<node-host>:1317 BASE_GRPC=<node-host>:9090 \
+#     BASE_RPC=http://<node-host>:26657 ./scripts/smoke-api-surface.sh
 set -uo pipefail
 
 BASE_REST="${BASE_REST:-http://localhost:1317}"
@@ -38,7 +38,7 @@ preflight() {
     echo "  scripts/localnet/init.sh" >&2
     echo "  sed -i.bak '/^\\[api\\]/,/^\\[/ s/^enable = false/enable = true/' \"\$TWILIGHT_LOCALNET_HOME/node0/config/app.toml\"" >&2
     echo "  scripts/localnet/start.sh   # wait for a block, then re-run this script" >&2
-    echo "Or point BASE_REST at a running node, e.g. BASE_REST=http://16.192.99.123:1317" >&2
+    echo "Or point BASE_REST at a running node, e.g. BASE_REST=http://<node-host>:1317" >&2
     exit 2
   fi
 }
