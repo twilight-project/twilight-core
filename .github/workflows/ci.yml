@@ -2,8 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
-  # Deliberately unfiltered by base branch. A base filter of [main, develop] gates
+    branches: [main]
+  # Deliberately unfiltered by base branch. A base filter of [main] gates
   # only the bottom PR of a stack: every PR that targets another feature branch —
   # which is how a large change is split into reviewable gates — would get no CI at
   # all, and would get it silently. Running on every pull request costs extra runs
@@ -22,8 +22,8 @@ jobs:
     name: build & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -86,8 +86,8 @@ jobs:
     # never fetched at run time: a gate that downloads its own fixtures certifies
     # whatever it was served, not what the repository contains.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -102,14 +102,14 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           # golangci-lint v2.x is required for Go 1.25 (the v1 line stops at Go 1.24).
           # .golangci.yml is in v2 config format. Bump this pin intentionally.
@@ -122,14 +122,14 @@ jobs:
     name: gofmt & tidy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './website/*'))
+          unformatted=$(find . -name '*.go' -not -path './website/*' -exec gofmt -l {} +)
           if [ -n "$unformatted" ]; then
             echo "::error::These files need gofmt:"; echo "$unformatted"; exit 1
           fi
@@ -142,18 +142,28 @@ jobs:
     name: proto descriptor up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
       - name: Install protoc (pinned)
         # Must match EXPECTED_PROTOC_VERSION in scripts/export-proto-descriptor.sh —
         # the descriptor set is byte-reproducible only for a fixed protoc version.
+        #
+        # The archive is verified against a pinned SHA-256 before it is unpacked, so
+        # a replaced or corrupted release asset fails here instead of silently
+        # becoming the compiler that certifies the committed descriptor. The digest
+        # was computed from the official v27.0 asset and cross-checked against
+        # aspect-build/toolchains_protoc's integrity table (sha384 of the same zip)
+        # and Maven Central's com.google.protobuf:protoc:4.27.0 linux-x86_64 SHA-1
+        # (of bin/protoc inside it). Bumping PROTOC_VERSION requires a new digest.
         run: |
           PROTOC_VERSION=27.0
-          curl -sSL -o /tmp/protoc.zip \
+          PROTOC_SHA256=e2bdce49564dbad4676023d174d9cdcf932238bc0b56a8349a5cb27bbafc26b0
+          curl -sSfL -o /tmp/protoc.zip \
             "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
           unzip -q /tmp/protoc.zip -d /tmp/protoc
           echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
       - name: Populate module cache (proto include paths)
@@ -191,8 +201,8 @@ jobs:
     # not listed there still fails, and an expired acceptance also fails, so an exception
     # cannot outlive its review date. See REVIEW.md.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
