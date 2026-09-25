@@ -9,8 +9,8 @@
 > [!WARNING]
 > **Public testnet, pre-1.0.** Twilight Core has **not been externally audited** and is
 > provided "as is", without warranty of any kind (see [LICENSE](LICENSE)). Testnet tokens
-> have **no monetary value**. Report vulnerabilities privately as described in
-> [SECURITY.md](SECURITY.md) — never in a public issue.
+> have **no monetary value**. Report newly discovered vulnerabilities privately as described
+> in [SECURITY.md](SECURITY.md) — never in a public issue.
 
 Twilight Core is a Cosmos SDK and CometBFT Proof-of-Authority chain. The node binary is
 `twilightd`. Full documentation: **https://twilight-project.github.io/twilight-core/**
@@ -52,7 +52,8 @@ no bank keeper and no funds — every transfer goes through `x/rewards`.
 
 **Determinism.** Epoch finalization runs in a cache context and is written only on full
 success — on any unexpected condition it fails closed (errors without committing partial
-state). See [REVIEW.md](REVIEW.md) for the determinism rules contributors follow.
+state). See the [determinism rules](CONTRIBUTING.md#determinism-rules-important-for-a-chain)
+contributors follow.
 
 ## Modules
 
@@ -141,15 +142,16 @@ In this repository: [architecture overview](docs/architecture/overview.md),
 ## Contributing
 
 Contributions are welcome. For non-trivial changes, open an issue first to discuss the
-approach. Consensus-critical areas (`x/coreslot`, `x/rewards`, `x/mining`, `app/` wiring,
-and genesis handling) get extra review — see [CONTRIBUTING.md](CONTRIBUTING.md) and
-[REVIEW.md](REVIEW.md).
+approach. Consensus-critical paths (`x/coreslot`, `x/rewards`, `x/mining`, `app/` wiring,
+upgrade handlers, and genesis import/export) get extra review — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [REVIEW.md](REVIEW.md).
 
 ## Security
 
-**Do not open public issues for security vulnerabilities.** If an issue may affect funds,
-validator keys, consensus safety, chain availability, private data, validator admission, or
-token accounting, report it privately — see [SECURITY.md](SECURITY.md).
+**Report newly discovered vulnerabilities privately**, through
+[GitHub private vulnerability reporting](https://github.com/twilight-project/twilight-core/security/advisories/new)
+— never in a public issue. Known limitations of the public testnet are tracked openly as
+issues. See [SECURITY.md](SECURITY.md) for scope and what to expect.
 
 ## License
 
