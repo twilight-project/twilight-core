@@ -1,11 +1,19 @@
 # Twilight Core
 
 [![CI](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml/badge.svg)](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/twilight-project/twilight-core?include_prereleases&sort=semver)](https://github.com/twilight-project/twilight-core/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/twilight-project/twilight-core.svg)](https://pkg.go.dev/github.com/twilight-project/twilight-core)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 
-Twilight Core is a greenfield Cosmos SDK and CometBFT Proof-of-Authority chain. The node
-binary is `twilightd`.
+> [!WARNING]
+> **Public testnet, pre-1.0.** Twilight Core has **not been externally audited** and is
+> provided "as is", without warranty of any kind (see [LICENSE](LICENSE)). Testnet tokens
+> have **no monetary value**. Report vulnerabilities privately as described in
+> [SECURITY.md](SECURITY.md) — never in a public issue.
+
+Twilight Core is a Cosmos SDK and CometBFT Proof-of-Authority chain. The node binary is
+`twilightd`. Full documentation: **https://twilight-project.github.io/twilight-core/**
 
 Validator admission and validator-set updates are owned exclusively by `x/coreslot`: the
 chain uses CoreSlot operators rather than a public staking validator set. The standard
@@ -33,9 +41,14 @@ epoch finalization, `utwlt` is minted into the rewards module account, tracked a
 maximum supply with **supply-threshold halving** (not a fixed block-height schedule). Each
 epoch's emission is allocated to eligible active operators by active-block participation and held
 as a per-`(slot, epoch)` entitlement until settlement releases it. An emergency authority can
-pause rewards, which stops accrual and release together. The chain's **default genesis has no premine**. (The standard
-Cosmos `distribution` module is omitted; reward distribution is handled entirely by
-Twilight's custom `x/rewards` module.)
+pause rewards, which stops accrual and release together. The chain's **default genesis has no premine**.
+
+**Settlement (`x/mining`).** Value leaves the rewards escrow only through settlement. When
+an epoch is finalized, `x/mining` materializes that epoch's settlement set, anchored to its
+block-driven settlement clock; each slot's settlement transactions then pay participants by
+chunk and finalize by returning the remainder to the payout address snapshotted at
+finalization. `x/mining` holds
+no bank keeper and no funds — every transfer goes through `x/rewards`.
 
 **Determinism.** Epoch finalization runs in a cache context and is written only on full
 success — on any unexpected condition it fails closed (errors without committing partial
@@ -47,6 +60,7 @@ state). See [REVIEW.md](REVIEW.md) for the determinism rules contributors follow
 |---|---|---|
 | [`x/coreslot`](x/coreslot) | Validator admission, slot lifecycle, consensus-key rotation, payout address, reward weight, and validator-set updates | `twilightd coreslot …`, `twilightd coreslot-query …` |
 | [`x/rewards`](x/rewards) | Epoch emission, supply-threshold halving, per-operator reward allocation and entitlements, emergency pause | `twilightd rewards …`, `twilightd rewards-query …` |
+| [`x/mining`](x/mining) | Settlement of per-`(slot, epoch)` entitlements: settlement clock, settlement-set materialization, chunked payout and finalization | `twilightd tx mining …`, `twilightd mining-query …` |
 
 Standard `tx`/`query` subcommands for the wired Cosmos modules (`bank`, `auth`, `consensus`)
 are generated via AutoCLI — e.g. `twilightd tx bank send`, `twilightd query bank balances`.
@@ -54,22 +68,24 @@ are generated via AutoCLI — e.g. `twilightd tx bank send`, `twilightd query ba
 ## Repository layout
 
 ```
-app/              application wiring (depinject runtime app, module registration, params)
+app/              application wiring (depinject runtime app, module registration, upgrades)
 cmd/twilightd/    node binary entrypoint
 x/coreslot/       CoreSlot PoA module (validator admission + set)
 x/rewards/        rewards / emission module
-proto/twilight/   protobuf definitions (coreslot, rewards)
+x/mining/         settlement module
+internal/         shared internal packages (checked arithmetic, address rules, query API)
+proto/twilight/   protobuf definitions (coreslot, rewards, mining)
+scripts/          release, provenance, smoke, and CI check scripts
 scripts/localnet/ localnet bring-up, smoke tests, and chaos drills
-docs/             architecture, operator guides, proto descriptors, references
+docs/             architecture, ADRs, operator guides, proto descriptors, references
 website/          Docusaurus documentation site
-tools/            auxiliary tooling (e.g. the read-only dashboard)
-tests/            integration tests
-devnet/           devnet genesis and configuration
+tools/            auxiliary tooling (the read-only dashboard)
 ```
 
 ## Prerequisites
 
-- **Go 1.25.x** and **make** — to build and test the chain (see `go.mod`).
+- **Go 1.25.x** (the version pinned in `go.mod`), **make**, and **git** — to build and test.
+- **jq** and **curl** — used by the localnet scripts.
 - **protoc** — only if you regenerate protobuf (`make proto`).
 - **Node.js + npm** — only to build the documentation site under `website/`.
 
@@ -91,6 +107,13 @@ make localnet-rewards-epoch-smoke  # rewards epoch finalization + entitlements
 make drills                    # lifecycle + restart-rotation + quorum drills
 ```
 
+The localnet setup funds its authority and emergency-authority accounts for local use only;
+the chain's default genesis has no premine.
+
+Release binaries (`make build-release`) are built from `git archive HEAD` and ship with
+`SHA256SUMS`, `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES` (the licenses of every
+statically linked dependency) — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Network interfaces
 
 A running node exposes the standard Cosmos / CometBFT interfaces:
@@ -98,47 +121,28 @@ A running node exposes the standard Cosmos / CometBFT interfaces:
 | Interface | Default port | Use |
 |---|---|---|
 | CometBFT RPC | 26657 | blocks, `/block_results`, `/tx`, `/validators`, consensus/node info |
-| gRPC | 9090 | typed query/tx services (coreslot, rewards, and the enabled Cosmos modules) |
+| gRPC | 9090 | typed query/tx services (coreslot, rewards, mining, and the enabled Cosmos modules) |
 | REST (gRPC-gateway) | 1317 | JSON wrapper over the gRPC query services |
 
 When `api.swagger` is enabled, merged OpenAPI docs are served at `/swagger/` on the REST
 port.
 
-## Status
-
-Twilight Core is pre-1.0 and under active development. The current codebase includes:
-
-- `x/coreslot` — validator admission, slot lifecycle management, and validator-set updates;
-- `x/rewards` — scheduled `utwlt` emission through epoch finalization, with per-operator
-  reward accounting and entitlements;
-- localnet smoke checks and operational drills exercising consensus-critical behavior.
-
-The localnet/dev setup (`scripts/localnet/init.sh`) funds the local authority and
-emergency-authority accounts with `1,000,000,000,000utwlt` each, for development and
-localnet use only (the chain's default genesis has no premine).
-
 ## Documentation
 
-The documentation site lives under [`website/`](website/) (Docusaurus):
+The documentation site is **https://twilight-project.github.io/twilight-core/** — start with
+[Install](https://twilight-project.github.io/twilight-core/getting-started/install/) and
+[Status & Validation](https://twilight-project.github.io/twilight-core/chain/status-and-validation/)
+(what has and has not been validated). Its source is under [`website/`](website/).
 
-```bash
-cd website && npm install
-npm run build                 # production build (use `npm run start` for local dev)
-```
-
-Key docs:
-
-- [docs/architecture/overview.md](docs/architecture/overview.md) — architecture overview (read-first)
-- [docs/architecture/adr/](docs/architecture/adr/README.md) — Architecture Decision Records
-- [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) — CoreSlot module design
-- [docs/operators/core-slot-operator-guide.md](docs/operators/core-slot-operator-guide.md) — operator guide
-- [CONTRIBUTING.md](CONTRIBUTING.md), [REVIEW.md](REVIEW.md), [SECURITY.md](SECURITY.md)
+In this repository: [architecture overview](docs/architecture/overview.md),
+[ADRs](docs/architecture/adr/README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
+[REVIEW.md](REVIEW.md).
 
 ## Contributing
 
 Contributions are welcome. For non-trivial changes, open an issue first to discuss the
-approach. Consensus-critical areas (`x/coreslot`, `x/rewards` economics, `app/` wiring, and
-genesis handling) get extra review — see [CONTRIBUTING.md](CONTRIBUTING.md) and
+approach. Consensus-critical areas (`x/coreslot`, `x/rewards`, `x/mining`, `app/` wiring,
+and genesis handling) get extra review — see [CONTRIBUTING.md](CONTRIBUTING.md) and
 [REVIEW.md](REVIEW.md).
 
 ## Security
@@ -149,4 +153,5 @@ token accounting, report it privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Twilight Core is licensed under the [Apache-2.0](LICENSE) License.
+Licensed under the [Apache License, Version 2.0](LICENSE).
+Copyright 2026 The Twilight Project Authors — see [NOTICE](NOTICE).

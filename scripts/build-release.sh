@@ -72,8 +72,20 @@ BUILD_TAGS="${BUILD_TAGS:-}"
 
 # Source comes from the commit, not the working directory.
 SRC="$(mktemp -d)"
-trap 'rm -rf "$SRC"' EXIT
+META="$(mktemp -d)"
+trap 'rm -rf "$SRC" "$META"' EXIT
 git archive HEAD | tar -x -C "$SRC" || refuse "could not export HEAD"
+
+# The binaries statically link third-party modules whose licenses must travel with
+# them (Apache-2.0 §4(d) also requires CometBFT's NOTICE), so every release carries
+# LICENSE, NOTICE and a third-party bundle. All three come from the same exported
+# commit as the binaries, and the bundle is generated before anything is written:
+# a linked module with no license file refuses the release like any other guard.
+for f in LICENSE NOTICE; do
+  [[ -f "$SRC/$f" ]] || refuse "$f is missing from HEAD"
+done
+( cd "$SRC" && RELEASE_TARGETS="$TARGETS" bash ./scripts/third-party-notices.sh "$META/THIRD_PARTY_NOTICES" ) \
+  || refuse "could not produce the third-party notices"
 
 LDFLAGS="-X github.com/cosmos/cosmos-sdk/version.Version=$VERSION \
 -X github.com/cosmos/cosmos-sdk/version.Commit=$COMMIT \
@@ -93,8 +105,15 @@ for t in $TARGETS; do
     || refuse "build failed for $t"
 done
 
-( cd "$OUT" && { command -v sha256sum >/dev/null && sha256sum twilightd-* \
-                 || shasum -a 256 twilightd-*; } > SHA256SUMS ) || refuse "could not write checksums"
+cp "$SRC/LICENSE" "$SRC/NOTICE" "$META/THIRD_PARTY_NOTICES" "$OUT/" \
+  || refuse "could not copy the license files"
+
+# The license files are checksummed alongside the binaries: they are part of the
+# release, and an operator verifying SHA256SUMS verifies them too.
+( cd "$OUT" && { command -v sha256sum >/dev/null \
+                   && sha256sum twilightd-* LICENSE NOTICE THIRD_PARTY_NOTICES \
+                 || shasum -a 256 twilightd-* LICENSE NOTICE THIRD_PARTY_NOTICES; } > SHA256SUMS ) \
+  || refuse "could not write checksums"
 
 echo
 echo "  $RELEASE_DIR/SHA256SUMS"
