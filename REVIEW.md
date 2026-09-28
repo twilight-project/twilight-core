@@ -46,10 +46,12 @@ through a pull request (security-advisory merges are the one exception, describe
 the security advisory's temporary private fork. GitHub runs no status checks there, CI cannot
 access the fork, and branch protection and rulesets are **not** enforced when the advisory is
 merged. Before merging from an advisory fork, the maintainer therefore runs the
-CI-equivalent checks locally:
+CI-equivalent checks locally, with **golangci-lint v2.12.2** (the version pinned in
+`ci.yml`) on the `PATH` for `make lint`:
 
 ```bash
 make build test consensus-vectors lint vet vuln
+GOOS=linux GOARCH=amd64 go build ./...   # CI runs on linux/amd64
 make check-vulncheck-pin release-upgrade-faults block-gas-faults check-genesis-faults check-cli-surface
 make fmt tidy proto-descriptor   # then confirm `git status` shows no changes
 ```

@@ -17,8 +17,8 @@ Report it privately through **GitHub Private Vulnerability Reporting**, the proj
 security channel. Use the direct link
 <https://github.com/twilight-project/twilight-core/security/advisories/new>, or choose
 **Report a vulnerability** on the repository's Security tab. This creates a draft advisory
-visible only to you and the repository's administrators and security managers. There is no
-security email address.
+visible only to you, the repository's administrators and security managers, and anyone the
+maintainers add to the advisory. There is no security email address.
 
 Please include as much of the following as possible:
 
@@ -36,10 +36,13 @@ Please include as much of the following as possible:
 - **Initial triage within 10 business days** — a severity assessment and whether we can
   reproduce the report, with follow-up questions where needed.
 - Updates while a fix is prepared.
-- **Coordinated disclosure after a fix ships**, once operators have had a reasonable window
-  to upgrade, on a disclosure date agreed with the reporter in the advisory.
-- The embargo is not open-ended: if no fix has shipped within **90 days of
-  acknowledgement**, the reporter and maintainers agree a disclosure date together.
+- **Coordinated disclosure.** We aim to ship a fix and agree a coordinated disclosure date
+  with the reporter, leaving operators a reasonable window to upgrade.
+- **Disclosure deadline.** If no disclosure date has been agreed within **90 days of the
+  report**, the reporter may publish after giving the maintainers **14 days' notice**
+  through the advisory. Either side may propose an extension, which applies when both
+  agree — for example while a fix that needs a coordinated validator upgrade is in
+  progress.
 
 We will credit the reporter in the advisory unless they prefer to remain anonymous.
 
@@ -119,8 +122,12 @@ faith under this policy. Good-faith research:
 - avoids degrading or disrupting network service, and does not destroy or modify data that
   is not the researcher's own;
 - complies with applicable law and does not involve extortion;
-- is reported privately through the channel above, and is not disclosed publicly before the
-  coordinated disclosure date agreed in the advisory.
+- is reported privately through the channel above, and is published only on the agreed
+  disclosure date or under the 90-day deadline with 14 days' notice described in
+  [What to expect](#what-to-expect).
+
+The private-reporting condition applies to newly discovered vulnerabilities; publicly
+discussing a known limitation that is already tracked in a public issue is fine.
 
 This safe harbor covers only this project. It cannot authorize testing of third-party
 systems — including nodes run by other operators, GitHub, or hosting providers — which are

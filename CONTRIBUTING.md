@@ -102,7 +102,9 @@ the same as being ready to launch one.
 The handler registry in `app/upgrades.go` is **append-only**: a released name can never be
 renamed or edited, because a syncing node must replay the same handler at the same height.
 
-Each release publishes **SHA-256 checksums** for its binaries. Operators run cosmovisor with
+### Building a release
+
+Each release publishes **SHA-256 checksums** for its artifacts. Operators run cosmovisor with
 `DAEMON_ALLOW_DOWNLOAD_BINARIES=false` and verify pre-staged binaries by hash, so the
 checksum is the artifact that matters, not the download.
 
@@ -111,7 +113,7 @@ checksum is the artifact that matters, not the download.
 compiled in, so even an unstamped `go build ./cmd/twilightd` identifies itself — an
 unstamped build reports an empty version, which is honest, because it was not released.
 
-`make build-release` produces the release artifacts and their checksums:
+`make build-release` produces the release artifacts:
 
 ```bash
 make build-release VERSION=v0.1.0
@@ -119,16 +121,45 @@ make build-release VERSION=v0.1.0
 
 Artifacts are built from **`git archive HEAD`**, not the working directory, so a release is the
 commit it names by construction: no build variable reaches inside, and untracked files are
-absent from the archive rather than merely undetected. It additionally refuses, before writing
-anything, a tree with uncommitted changes to tracked files or with untracked `.go`/module files
-the build would consume — untracked material that cannot reach the compiler, such as
-`docs/specs/`, is not an obstacle.
+absent from the archive rather than merely undetected. The release is written to
+`build/release/`:
+
+- the three binaries, `twilightd-<version>-<os>-<arch>`;
+- `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES`;
+- `SHA256SUMS`, covering all six files. An operator checking a single binary runs
+  `sha256sum -c --ignore-missing SHA256SUMS`.
+
+`THIRD_PARTY_NOTICES` is generated at release time by `scripts/third-party-notices.sh`, from
+the same exported tree as the binaries. It carries the license, `NOTICE` and `PATENTS` files of
+every module linked into `twilightd` (the union over the release targets) and of Go itself,
+any `licenses/` directory at a module root, a `proxy.golang.org` source URL for each module,
+and the list of MPL-2.0 modules (MPL-2.0 §3.2(a)). It is not committed; to inspect it, run
+`scripts/third-party-notices.sh > THIRD_PARTY_NOTICES`.
+
+The release is assembled in a staging directory and swapped into place only after it verifies
+against its own `SHA256SUMS`. It **refuses**, leaving any previous release byte-identical,
+when:
+
+- the tree has uncommitted changes, or untracked files anywhere outside `docs/specs/` (the
+  rule is default-deny: the toolchain consumes more than `.go` files, and `//go:embed` can
+  reach a file of any extension), or a `go.work` exists;
+- a linked module has no `LICENSE` or `COPYING` file at its root;
+- `go.mod` or `go.sum` would change;
+- any target fails to build.
+
+`RELEASE_DIR` must be a relative path below the repository.
+
+The environment cannot change what is built. Releases run with `GOENV=off GOWORK=off
+GOFLAGS=-mod=readonly CGO_ENABLED=0`, `GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off`, and an empty
+`GOEXPERIMENT`. Settings such as `GOPROXY` or `GOPRIVATE` must therefore be passed as real
+environment variables, not through `go env -w`. A release works offline (`GOPROXY=off`) when
+the module cache already holds what the build needs.
 
 An artifact named for a version but built from uncommitted work would report a commit its
 source does not match, and the checksum would hash it faithfully without disclosing that.
 `make build` stays usable on a dirty tree and appends `-dirty` to whatever version it is given;
 that marker cannot be switched off from the command line. `make check-release-stamping` covers
-all of it.
+all of the above; it needs a clean tree.
 
 Binaries target the platforms validators actually run:
 
