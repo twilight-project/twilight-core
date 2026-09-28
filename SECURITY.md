@@ -122,12 +122,13 @@ faith under this policy. Good-faith research:
 - avoids degrading or disrupting network service, and does not destroy or modify data that
   is not the researcher's own;
 - complies with applicable law and does not involve extortion;
-- is reported privately through the channel above, and is published only on the agreed
-  disclosure date or under the 90-day deadline with 14 days' notice described in
-  [What to expect](#what-to-expect).
+- is reported privately through the channel above, and is published no earlier than the
+  agreed disclosure date or, if none has been agreed, under the 90-day deadline with 14
+  days' notice described in [What to expect](#what-to-expect).
 
-The private-reporting condition applies to newly discovered vulnerabilities; publicly
-discussing a known limitation that is already tracked in a public issue is fine.
+The private-reporting condition applies to newly discovered vulnerabilities. Publicly
+discussing what an existing public issue already describes is fine; a new way to exploit a
+known limitation is a new vulnerability — report it privately.
 
 This safe harbor covers only this project. It cannot authorize testing of third-party
 systems — including nodes run by other operators, GitHub, or hosting providers — which are

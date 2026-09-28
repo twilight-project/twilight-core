@@ -133,21 +133,29 @@ absent from the archive rather than merely undetected. The release is written to
 the same exported tree as the binaries. It carries the license, `NOTICE` and `PATENTS` files of
 every module linked into `twilightd` (the union over the release targets) and of Go itself,
 any `licenses/` directory at a module root, a `proxy.golang.org` source URL for each module,
-and the list of MPL-2.0 modules (MPL-2.0 §3.2(a)). It is not committed; to inspect it, run
-`scripts/third-party-notices.sh > THIRD_PARTY_NOTICES`.
+and the list of MPL-2.0 modules (MPL-2.0 §3.2(a)). It is not committed. To inspect it, write it
+under the git-ignored `build/` directory, so that it cannot trip the untracked-file refusal
+below (the script does not create the directory):
+
+```bash
+mkdir -p build && scripts/third-party-notices.sh build/THIRD_PARTY_NOTICES
+```
 
 The release is assembled in a staging directory and swapped into place only after it verifies
 against its own `SHA256SUMS`. It **refuses**, leaving any previous release byte-identical,
 when:
 
-- the tree has uncommitted changes, or untracked files anywhere outside `docs/specs/` (the
-  rule is default-deny: the toolchain consumes more than `.go` files, and `//go:embed` can
-  reach a file of any extension), or a `go.work` exists;
+- the tree has uncommitted changes to tracked files;
+- there are untracked files that are not git-ignored, outside `docs/specs/` (the rule is
+  default-deny: the toolchain consumes more than `.go` files, and `//go:embed` can reach a
+  file of any extension);
+- a `go.work` or `go.work.sum` exists (both are git-ignored, so they are checked by name);
+- `LICENSE` or `NOTICE` is missing from `HEAD`;
 - a linked module has no `LICENSE` or `COPYING` file at its root;
 - `go.mod` or `go.sum` would change;
-- any target fails to build.
-
-`RELEASE_DIR` must be a relative path below the repository.
+- any target fails to build, or the staged release does not verify against its own
+  `SHA256SUMS`;
+- `RELEASE_DIR` is not a relative path below the repository.
 
 The environment cannot change what is built. Releases run with `GOENV=off GOWORK=off
 GOFLAGS=-mod=readonly CGO_ENABLED=0`, `GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off`, and an empty
@@ -158,8 +166,23 @@ the module cache already holds what the build needs.
 An artifact named for a version but built from uncommitted work would report a commit its
 source does not match, and the checksum would hash it faithfully without disclosing that.
 `make build` stays usable on a dirty tree and appends `-dirty` to whatever version it is given;
-that marker cannot be switched off from the command line. `make check-release-stamping` covers
-all of the above; it needs a clean tree.
+that marker cannot be switched off from the command line.
+
+`make check-release-stamping` exercises the provenance guards against the real `Makefile`; it
+needs a clean tree. It covers:
+
+- `-dirty` stamping that a command-line `VERSION` or `DIRTY=` cannot remove;
+- refusal of a dirty tree, untracked build inputs (`.go` and `.s`), and `go.work`, and that
+  a refusal leaves an existing release in place;
+- immunity to ambient `GOFLAGS` and to a user go env file;
+- the `GOAMD64` and `GOEXPERIMENT` pins (the artifacts stay byte-identical);
+- the staged swap: a failed target build, or `go.sum` changing mid-release, leaves the
+  previous release byte-identical with no staging directory behind;
+- a clean release producing three commit-stamped, `-trimpath`, `CGO_ENABLED=0` binaries listed
+  in `SHA256SUMS`.
+
+It does not exercise the license files and their checksums, the missing-module-license
+refusal, the `RELEASE_DIR` guard, offline builds, or the `GOARM64` and `GOFIPS140` pins.
 
 Binaries target the platforms validators actually run:
 
