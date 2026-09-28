@@ -9,8 +9,9 @@ set -euo pipefail
 #
 # Required env:
 #   PUBLIC_IP   the instance's public IP or DNS (advertised to peers)
+#   CHAIN_ID    the new network's chain-id (no default: every network names its own)
 # Optional env (devnet defaults):
-#   CHAIN_ID=twilight-devnet-1  HOME_DIR=~/.twilight-devnet
+#   HOME_DIR=~/.twilight-devnet
 #   MONIKER=twilight-devnet-validator  EPOCH_LENGTH=360 (the ratified minimum)
 #   RPC_PORT=26657  P2P_PORT=26656  FAUCET_BALANCE=1000000000000
 #
@@ -26,7 +27,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/twilightd}"
 PUBLIC_IP="${PUBLIC_IP:?set PUBLIC_IP to the instance public IP/DNS}"
-CHAIN_ID="${CHAIN_ID:-twilight-devnet-1}"
+CHAIN_ID="${CHAIN_ID:?set CHAIN_ID to the chain-id of the new network}"
 HOME_DIR="${HOME_DIR:-$HOME/.twilight-devnet}"
 MONIKER="${MONIKER:-twilight-devnet-validator}"
 # The admissible interval is immutable and genesis refuses anything outside it
@@ -137,5 +138,5 @@ echo "RPC      : http://${PUBLIC_IP}:${RPC_PORT}"
 echo "home     : $HOME_DIR"
 echo "join doc : $HOME_DIR/JOIN.md"
 echo
-echo "start it (systemd recommended for a long-lived devnet; see devnet/README.md):"
+echo "start it (run it under a service manager such as systemd for a long-lived devnet):"
 echo "  $BIN start --home $HOME_DIR --minimum-gas-prices 0utwlt"

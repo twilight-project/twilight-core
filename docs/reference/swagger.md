@@ -2,15 +2,15 @@
 
 Twilight serves a single merged Swagger/OpenAPI document for its **enabled** REST
 surface — the Cosmos SDK modules this app actually registers **plus** the custom
-`x/rewards` and `x/coreslot` modules. It is served by the node's API server (REST,
+`x/rewards`, `x/coreslot` and `x/mining` modules. It is served by the node's API server (REST,
 default `:1317`) and rendered with an embedded Swagger UI.
 
 ## What it documents
 
-Full enabled REST surface (61 paths), merged into one spec:
+The full enabled REST surface, merged into one spec:
 
-- **Twilight custom modules:** `twilight.rewards.v1` (10 routes), `twilight.coreslot.v1`
-  (10 routes). See `docs/reference/rest-routes.md` for the route inventory.
+- **Twilight custom modules:** `twilight.rewards.v1`, `twilight.coreslot.v1` and
+  `twilight.mining.v1`. See `docs/reference/rest-routes.md` for the route inventory.
 - **Enabled Cosmos SDK modules:** `auth`, `bank`, `tx`, `consensus`,
   `base/tendermint` (node/block/validatorset), `base/node`.
 
@@ -44,8 +44,7 @@ Config behavior:
 - Swagger UI: `http://<host>:1317/swagger/`
 - OpenAPI spec (JSON): `http://<host>:1317/swagger/twilight.swagger.json`
 
-Devnet example: `http://16.192.99.123:1317/swagger/` (after that node runs a binary
-built with API-3; redeploy required).
+For a local node with the API enabled: `http://localhost:1317/swagger/`.
 
 ## Generated file & embedding
 

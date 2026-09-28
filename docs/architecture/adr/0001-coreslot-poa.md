@@ -137,7 +137,7 @@ either trip the single-emitter halt above or collapse back into Option A.
 - **Simulation vs drills** — resolved: module-specific determinism tests + operational drills
   and soak runs instead of the staking-shaped SDK simulation harness.
 - **Explorer/indexer compatibility** — tracked: downstream indexing uses the CoreSlot queries
-  + CometBFT validators (see [`../../reference/explorer-integration-handoff.md`](../../reference/explorer-integration-handoff.md)); the C1 fallback trigger remains documented should a populated staking set ever be required.
+  + CometBFT validators (see [`../../reference/explorer-integration.md`](../../reference/explorer-integration.md)); the C1 fallback trigger remains documented should a populated staking set ever be required.
 
 ## Enforcement
 

@@ -114,7 +114,7 @@ async function tick() {
 twilightd coreslot register &lt;operator&gt; &lt;payout&gt; &lt;settlement&gt; &lt;consensus-pubkey-b64&gt; "&lt;moniker&gt;" $C
 twilightd coreslot-query slots --node http://localhost:26657 -o json   # find new slot-id
 twilightd coreslot activate &lt;slot-id&gt; $C</pre>
-    <div class="k" style="text-transform:none;letter-spacing:0">Operator gets their pubkey with <code>twilightd comet show-validator | jq -r .key</code>. See devnet/README.md.</div>
+    <div class="k" style="text-transform:none;letter-spacing:0">Operator gets their pubkey with <code>twilightd comet show-validator | jq -r .key</code>. See docs/operators/core-slot-operator-guide.md.</div>
   </div>`;
 
   // --- blocks (wide) ---
