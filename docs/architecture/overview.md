@@ -77,8 +77,10 @@ full rewards/emission decision and parameters.
 ## 6. Consensus-path safety principles
 
 State-machine code that runs on the consensus path is held to determinism and fail-closed
-rules (a cross-cutting principle, recorded across the ADRs and the contributor
-[review process](../../REVIEW.md) rather than a separate ADR):
+rules (a cross-cutting principle, recorded across the ADRs, the contributor
+[determinism rules](../../CONTRIBUTING.md#determinism-rules-important-for-a-chain), and the
+hard invariants in [`AGENTS.md`](../../AGENTS.md#hard-invariants--do-not-break) rather than a
+separate ADR):
 
 - **Deterministic, integer-only.** No wall-clock time, floating point, randomness, or
   map-iteration-order dependence in consensus paths; emission math is integer arithmetic.
