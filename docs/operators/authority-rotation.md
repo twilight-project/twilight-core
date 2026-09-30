@@ -199,10 +199,14 @@ detect a completed one.
 ## Genesis
 
 A fresh genesis should carry no pending nominations, and `coreslot-genesis set-authorities` sets
-both roles directly. Genesis validation does **not** require the list to be empty, so check
-`app_state.coreslot.pending_authority_transfers` is `[]` before signing off on a launch genesis,
-and run `coreslot-query pending-authority-transfers` once the chain is up: a nomination carried in
-genesis can be accepted by its nominee at any height.
+both roles directly. The chain's own genesis validation does **not** require the list to be empty,
+but `make check-genesis` does: its `fresh.pending_authority_transfers_empty` check refuses a
+launch genesis that carries one. It takes the launch decisions as input (the `GC_*` variables:
+chain-id, active slots, `max_gas`, both authorities and the rest) and refuses to run without them;
+the full invocation is in the comment above `check-genesis` in the `Makefile`. Run it before
+signing off on a launch genesis, and run
+`coreslot-query pending-authority-transfers` once the chain is up: a nomination carried in genesis
+can be accepted by its nominee at any height.
 
 Note that a genesis produced by plain `twilightd init` seeds both fields with **module
 addresses**, which nobody can sign for — a chain launched without running `set-authorities` is

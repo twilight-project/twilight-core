@@ -5016,7 +5016,7 @@
           "$ref": "#/definitions/v1PendingAuthorityTransfer"
         }
       },
-      "description": "PendingAuthorityTransferEntry pairs a transfer with its role for genesis,\nwhere there is no collection key to carry it."
+      "description": "PendingAuthorityTransferEntry pairs a transfer with its role wherever the\ncollection key that carries the role in state is absent: in genesis, and in\nthe pending-authority-transfers query response."
     },
     "v1PendingKeyRotation": {
       "type": "object",
