@@ -159,6 +159,12 @@ func TestQuerySurfaceMatchesPinnedContract(t *testing.T) {
 			require.NotNil(t, sub.RunE,
 				"the command is registered but has no RunE, so nothing on the real execution path reaches the builder and dispatch asserted below")
 
+			// Cobra checks Args before RunE, so a command whose arity no longer
+			// accepts the contract's sample arguments fails before its builder runs,
+			// while the direct build below still passes.
+			require.NoError(t, sub.ValidateArgs(e.Args),
+				"the command's argument rule refuses the contract's sample arguments, so it cannot run as documented")
+
 			req, err := sp.build(e.Args)
 			require.NoError(t, err, "the command could not build its request from the contract's sample arguments")
 			require.Equal(t, e.Request, strings.TrimPrefix(fmt.Sprintf("%T", req), "*types."),
