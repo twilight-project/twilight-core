@@ -11,6 +11,7 @@ import (
 
 	"cosmossdk.io/collections"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
@@ -287,7 +288,11 @@ func (q queryServer) PendingKeyRotations(ctx context.Context, _ *types.QueryPend
 // holds at most two entries, and Int32Key iterates them in role order. A stored
 // key outside those two roles is refused as corruption rather than rendered: it
 // is state no write path could have produced, and presenting it under a role
-// name the caller does not recognize would hide the contradiction.
+// name the caller does not recognize would hide the contradiction. A stored
+// value is held to the same standard: a nominee that is not an address, or a
+// height that is not positive, decodes cleanly but is a record no nomination or
+// genesis import could have written, so it is refused rather than rendered as a
+// handover in flight.
 func (q queryServer) PendingAuthorityTransfers(ctx context.Context, _ *types.QueryPendingAuthorityTransfersRequest) (*types.QueryPendingAuthorityTransfersResponse, error) {
 	resp := &types.QueryPendingAuthorityTransfersResponse{}
 	err := q.PendingAuthority.Walk(ctx, nil, func(key int32, transfer types.PendingAuthorityTransfer) (bool, error) {
@@ -297,6 +302,12 @@ func (q queryServer) PendingAuthorityTransfers(ctx context.Context, _ *types.Que
 			// registered SDK error carries its own GRPCStatus (Unknown), which
 			// mandatoryStateError would pass through instead of classifying.
 			return true, fmt.Errorf("a nomination is stored under key %d, which is not an authority role", key)
+		}
+		if _, err := sdk.AccAddressFromBech32(transfer.Nominee); err != nil {
+			return true, fmt.Errorf("the %s nomination has an invalid nominee: %s", role, err.Error())
+		}
+		if transfer.NominatedHeight <= 0 {
+			return true, fmt.Errorf("the %s nomination has a non-positive nominated height %d", role, transfer.NominatedHeight)
 		}
 		transferCopy := transfer
 		resp.Transfers = append(resp.Transfers, &types.PendingAuthorityTransferEntry{Role: role, Transfer: &transferCopy})

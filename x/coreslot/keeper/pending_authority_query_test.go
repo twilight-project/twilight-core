@@ -281,3 +281,28 @@ func TestPendingAuthorityTransfersQueryRefusesAStrayRole(t *testing.T) {
 		})
 	}
 }
+
+// A value that decodes but that no write path could produce is refused like a
+// stray key. Runtime nomination and genesis import both require a nominee that is
+// an address and a positive height; a record without them rendered as a live
+// handover would be a damaged database reported as a clean answer.
+func TestPendingAuthorityTransfersQueryRefusesAnImpossibleValue(t *testing.T) {
+	for name, transfer := range map[string]types.PendingAuthorityTransfer{
+		"empty record":       {},
+		"empty nominee":      {Nominee: "", NominatedHeight: 5},
+		"nominee not bech32": {Nominee: "not-an-address", NominatedHeight: 5},
+		"zero height":        {Nominee: addr(0x21), NominatedHeight: 0},
+		"negative height":    {Nominee: addr(0x21), NominatedHeight: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, k, ctx, _, _, _ := pendingSetup(t)
+			require.NoError(t, k.PendingAuthority.Set(ctx, int32(primaryRole), transfer))
+
+			resp, err := policyQueryClient(t, k, ctx).PendingAuthorityTransfers(context.Background(),
+				&types.QueryPendingAuthorityTransfersRequest{})
+			require.Error(t, err)
+			require.Nil(t, resp)
+			require.Equal(t, codes.Internal, grpcstatus.Code(err))
+		})
+	}
+}
