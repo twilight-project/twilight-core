@@ -302,24 +302,41 @@ func TestTelemetryAuthorityInfoFollowsASameBlockRotation(t *testing.T) {
 	require.False(t, early, "the successor is exported before any rotation")
 	require.Equal(t, float64(0), before[primaryPending])
 
+	// commitOne produces exactly one block and checks the nomination gauge at
+	// that commit against what the caller says it must read. Every block of this
+	// test goes through it, so there is no commit at which the gauge is not
+	// looked at: if the two steps of the rotation were ever split across blocks,
+	// the commit between them would have to claim 0 and would read 1.
+	commitOne := func(wantPrimaryPending float64) map[string]float64 {
+		chain.commitThrough(t, chain.head+1)
+		values := gather()
+		require.Equal(t, wantPrimaryPending, values[primaryPending], "the nomination gauge at height %d", chain.head)
+		return values
+	}
+	primary := coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY
+	ms := coreslotkeeper.NewMsgServer(chain.app.CoreSlotKeeper)
+
 	// Both steps through the message server against the same uncommitted head,
 	// so the next block commits the nomination and its acceptance together.
 	ctx := chain.headContext()
-	ms := coreslotkeeper.NewMsgServer(chain.app.CoreSlotKeeper)
-	_, err := ms.NominateAuthority(ctx, &coreslottypes.MsgNominateAuthority{
-		Authority: incumbent, Role: coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY, Nominee: successor,
-	})
+	_, err := ms.NominateAuthority(ctx, &coreslottypes.MsgNominateAuthority{Authority: incumbent, Role: primary, Nominee: successor})
 	require.NoError(t, err)
-	_, err = ms.AcceptAuthority(ctx, &coreslottypes.MsgAcceptAuthority{
-		Nominee: successor, Role: coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
-	})
+	_, err = ms.AcceptAuthority(ctx, &coreslottypes.MsgAcceptAuthority{Nominee: successor, Role: primary})
 	require.NoError(t, err)
-	chain.commitThrough(t, 3)
 
-	after := gather()
+	// 0: the nomination never existed at a commit. If the gauge can now see a
+	// same-block rotation, this test's premise needs restating.
+	after := commitOne(0)
 	require.Equal(t, float64(1), after[series(successor)], "the info series did not follow the rotation")
-	require.Equal(t, float64(0), after[primaryPending],
-		"the nomination gauge saw a same-block rotation; if it now can, this test's premise needs restating")
+
+	// The contrast, so the zero above is not a gauge that never moves: a
+	// nomination that waits one block IS seen, and the info series does not move
+	// until it is accepted.
+	next := acc(0x5b)
+	_, err = ms.NominateAuthority(chain.headContext(), &coreslottypes.MsgNominateAuthority{Authority: successor, Role: primary, Nominee: next})
+	require.NoError(t, err)
+	waiting := commitOne(1)
+	require.Equal(t, float64(1), waiting[series(successor)], "the info series moved on a nomination alone")
 }
 
 // targetLabels are label names a scrape configuration commonly stamps on every

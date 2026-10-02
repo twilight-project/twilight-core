@@ -251,11 +251,12 @@ func emitCoreSlotTelemetry(snap coreslotkeeper.TelemetrySnapshot) {
 // The nomination gauge cannot be that alert. A key holder can nominate and
 // accept in the same block, and then no committed height ever has a nomination
 // pending. Whatever order a rotation takes, the addresses end up different, and
-// absent() over the recorded pair fires.
+// a rule that matches any series whose addresses are not the recorded ones
+// fires on the first scrape of the new series.
 //
-// It is one series. On a rotation the series with the old addresses stops being
-// refreshed and the sink expires it after the retention window, exactly like a
-// build_info series after an upgrade.
+// It is one series per commit. On a rotation the series with the old addresses
+// stops being refreshed and the sink expires it after the retention window, so
+// for that long a node exports both.
 func emitAuthorityInfo(module, authority, emergencyAuthority string) {
 	telemetry.SetGaugeWithLabels(
 		[]string{telemetryNamespace, module, "authority_info"},

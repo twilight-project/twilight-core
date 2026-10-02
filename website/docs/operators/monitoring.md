@@ -191,7 +191,7 @@ counter is a consensus-state change and is tracked separately.
 `twilight_coreslot_pending_authority_nomination` is the alertable signal for an
 authority handover: it is 1 from the block a nomination is committed until it is
 accepted or canceled (a replacement nomination keeps it at 1). It says **that** a handover is open,
-not **to whom** — metric labels carry no addresses. To see who is nominated, ask
+not **to whom** — this gauge's labels carry no addresses. To see who is nominated, ask
 the chain:
 
 ```bash
@@ -259,24 +259,36 @@ testnet's 360-block epochs; scale to your epoch length.
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
 | Authority nomination pending | `max by (authority_role) (twilight_coreslot_pending_authority_nomination) == 1` | A handover is waiting to be accepted. Expected only during a planned rotation; otherwise an incident (there is no timelock: the nominee can accept in the next block). Page, then run `pending-authority-transfers` to see who is nominated. Blind to a same-block nominate + accept (see above) |
-| Authority changed | `twilight_coreslot_authority_info{authority!="<primary>"} or twilight_coreslot_authority_info{emergency_authority!="<emergency>"}` | A role is held by an address you did not record. Fires on the first scrape after any rotation, in any order, including a nominate + accept in one block (see below) |
-| Authority gauge missing | `absent(twilight_coreslot_authority_info)` for 10 minutes | No node exports the gauge (an older build, or telemetry off), so the alert above matches nothing and is silent |
+| Authority changed | `twilight_coreslot_authority_info{chain_id="<chain>", authority!="<primary>"} or twilight_coreslot_authority_info{chain_id="<chain>", emergency_authority!="<emergency>"}` | A role is held by an address you did not record. Fires on the first scrape after a rotation, in any order, including a nominate + accept in one block (see below) |
+| Authority gauge missing | `absent(twilight_coreslot_authority_info{chain_id="<chain>"})` for 10 minutes | No node of that chain exports the gauge (an older build, or telemetry off), so the alert above matches nothing and is silent |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 
 **Authority changed:** `twilight_coreslot_authority_info` carries the two addresses as
 labels, so "a role moved" is something Prometheus can alert on. Record the `authority`
-and `emergency_authority` the network launched with, put them in the expression above in
-place of `<primary>` and `<emergency>`, and update the rule as the last step of every
-planned rotation. The alert then matches any series whose addresses are not the recorded
-ones. This is the check that catches a stolen authority key, whatever order its holder
-uses: the result of a rotation is always a different address, even when no height ever
-showed a nomination pending.
+and `emergency_authority` the network launched with and put them in the expression above
+in place of `<primary>` and `<emergency>`. The alert then matches any series whose
+addresses are not the recorded ones. This is the check that catches a stolen authority
+key, whatever order its holder uses: the result of a rotation is always a different
+address, even when no height ever showed a nomination pending. The alert's own labels are
+the new addresses.
 
-The alert's own labels are the new addresses. For about one
-`prometheus-retention-time` after a rotation a node exports two series, the old pair and
-the new: the old one stops being refreshed and the sink expires it. The expression above
-does not wait for that, because it matches the new series as soon as it is scraped.
+Scope every selector to the chain (`chain_id` is the global label the `app.toml` above
+attaches). The recorded addresses belong to one chain; a Prometheus that also scrapes a
+devnet would otherwise fire on the devnet's authorities, and `absent()` would be satisfied
+by them.
+
+Series expiry sets two limits. A node exports one series per commit; after a rotation the
+series with the old addresses stops being refreshed and the sink expires it one
+`prometheus-retention-time` later, so for that long the node exports both. So:
+
+- **After a planned rotation, update the rule one retention time later, not at once,** or
+  silence it for that long: the old series still matches the updated rule until it expires.
+- **A rotation that is undone again is visible only while its series lives:** one retention
+  time after the last commit that showed it, and never if it was undone within the same
+  block. Keep the retention time at least twice the scrape interval, so one missed scrape
+  does not lose it. Undoing a rotation needs the key that made it, so this does not help an
+  attacker keep a key they do not hold.
 
 The gauge is new after `v0.3.0-rc4`. On a node that does not export it, run the same
 comparison outside Prometheus: on a schedule, compare `twilightd coreslot-query params`
