@@ -240,6 +240,21 @@ else
   fail "a line is found when far more output follows it" \
     "the reader lost a line that is in the output — a writer killed by SIGPIPE under pipefail"
 fi
+# And the other direction, which no case below would notice: every one of them
+# expects the reader to say yes. A reader that matches too much — the pattern
+# left unquoted, say, so it shrinks to the bare word FAIL — would be satisfied by
+# ANY check's FAIL line, and most faults make more than one check fail. Here the
+# wanted id is present only as a PASS, beside a FAIL for a different id.
+{
+  printf '  PASS  [selftest.early_match] the wanted id, but passing\n'
+  printf '  FAIL  [selftest.other] a different check failing\n'
+} >"$WORK/out"
+if out_has "FAIL  \[selftest.early_match\]"; then
+  fail "a FAIL for a different check is not mistaken for the wanted one" \
+    "the reader matched a line that is not in the output — it would report a dead check as live"
+else
+  pass "a FAIL for a different check is not mistaken for the wanted one"
+fi
 
 # ---- each check gets a fault that must make IT fire --------------------------------------
 #
