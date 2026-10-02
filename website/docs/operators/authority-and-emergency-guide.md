@@ -84,8 +84,11 @@ for the `coreslot_authority_accepted` event.
 
 ## Recovery
 
-- **Accidental pause:** `resume` the same flags. Settlement re-enabled past a
-  boundary finalizes the open epoch once.
+- **Accidental pause:** `rewards resume` from the emergency authority. A pause is
+  global, so there are no flags to match. It takes effect at the next block;
+  blocks produced while paused are not repaid, and the settlement clock was
+  frozen for them, so no settlement window was consumed. Epoch finalization never
+  stopped: a boundary reached while paused closed its epoch as usual.
 - **Bad queued params:** queue a corrected `update-params` before the next
   boundary (the latest queued params win).
 - **Key compromise:** rotate the authority/emergency key via CoreSlot. A

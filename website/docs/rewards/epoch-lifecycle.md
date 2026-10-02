@@ -28,9 +28,10 @@ twilightd rewards-query epoch-info --node <rpc>
 
 ## Finalization steps
 
-At EndBlock, when the height reaches the boundary **and** settlement is enabled,
-the module finalizes the epoch atomically (in a cache context, so any fault rolls
-back entirely):
+At EndBlock, when the height reaches the boundary, the module finalizes the epoch
+atomically (in a cache context, so any fault rolls back entirely). The boundary is
+unconditional: a pause does not defer it, a paused epoch simply closes with only
+the blocks before the pause counted.
 
 1. Compute the clipped epoch emission ([economics](economics.mdx)). If emissions
    are paused, emission is zero and cumulative emitted does not advance.
