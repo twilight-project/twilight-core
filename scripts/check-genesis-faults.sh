@@ -198,9 +198,24 @@ run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WO
   return $rc
 }
 
+# out_has <pattern> — does the last checker run's output, colour stripped, have a
+# line matching <pattern>?
+#
+# It goes through a file and never through `sed … | grep -q`. Under `set -o
+# pipefail` that pipeline is a race the suite loses at random: grep -q exits at its
+# first match, sed is then killed by SIGPIPE on its next write (exit 141), and
+# pipefail reports a line that WAS found as a failure. The checker's output is
+# longer than one write, so on a loaded machine live checks were reported as dead,
+# a different handful on every run — the suite failing for a reason that has
+# nothing to do with the check it names, which is the thing it exists to rule out.
+out_has() {
+  sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" >"$WORK/out.plain"
+  grep -q -- "$1" "$WORK/out.plain"
+}
+
 echo
 echo "==> baseline must PASS (nothing below means anything otherwise)"
-if run_checker "$GOOD" && sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+if run_checker "$GOOD" && out_has "PASS  \[native.initchain\]"; then
   pass "a complete genesis passes, InitChain dry-run included (the default)"
 else
   printf '\033[31mBASELINE FAILED — the suite cannot run\033[0m\n'
@@ -208,6 +223,38 @@ else
   exit 2
 fi
 CHECKER_FLAGS="--no-initchain"
+
+# The reader is itself a check, so it gets a fault too. This is the race in its
+# deterministic form: a matching line followed by more output than a pipe holds,
+# so a reader that stops at the first match always leaves the writer writing into
+# a closed pipe. `sed … | grep -q` under pipefail fails this every time.
+echo
+echo "==> the suite's own reader"
+{
+  printf '  FAIL  [selftest.early_match] a match on the first line\n'
+  awk 'BEGIN { for (i = 0; i < 20000; i++) print "  PASS  [selftest.filler] padding" }'
+} >"$WORK/out"
+if out_has "FAIL  \[selftest.early_match\]"; then
+  pass "a line is found when far more output follows it"
+else
+  fail "a line is found when far more output follows it" \
+    "the reader lost a line that is in the output — a writer killed by SIGPIPE under pipefail"
+fi
+# And the other direction, which no case below would notice: every one of them
+# expects the reader to say yes. A reader that matches too much — the pattern
+# left unquoted, say, so it shrinks to the bare word FAIL — would be satisfied by
+# ANY check's FAIL line, and most faults make more than one check fail. Here the
+# wanted id is present only as a PASS, beside a FAIL for a different id.
+{
+  printf '  PASS  [selftest.early_match] the wanted id, but passing\n'
+  printf '  FAIL  [selftest.other] a different check failing\n'
+} >"$WORK/out"
+if out_has "FAIL  \[selftest.early_match\]"; then
+  fail "a FAIL for a different check is not mistaken for the wanted one" \
+    "the reader matched a line that is not in the output — it would report a dead check as live"
+else
+  pass "a FAIL for a different check is not mistaken for the wanted one"
+fi
 
 # ---- each check gets a fault that must make IT fire --------------------------------------
 #
@@ -245,7 +292,7 @@ check_mutant() {
   # EXACT id match, anchored. Substring matching on prose previously let a short
   # pattern be satisfied by a different check's output, so a mutation could look
   # proven while the check it named stayed dead.
-  if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "FAIL  \[${want}\]"; then
+  if out_has "FAIL  \[${want}\]"; then
     pass "$label"
   else
     fail "$label" "checker failed, but not on [${want}] — the intended check may be dead"
@@ -630,7 +677,7 @@ echo
 echo "==> InitChain dry-run (on by default)"
 CHECKER_FLAGS=""
 if run_checker "$GOOD"; then
-  if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+  if out_has "PASS  \[native.initchain\]"; then
     pass "the baseline genesis completes InitChain"
   else
     fail "the baseline genesis completes InitChain" "the checker passed without running the dry-run"
@@ -641,7 +688,8 @@ fi
 mutate "a module-account settlement address panics InitChain" \
   ".app_state.coreslot.slots[1].settlement_address=\"$REWARDS_MODULE_ADDR\"" \
   native.initchain
-if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -A1 "FAIL  \[native.initchain\]" | grep -q "module account: $REWARDS_MODULE_ADDR"; then
+if out_has "FAIL  \[native.initchain\]" \
+  && [[ "$(grep -A1 "FAIL  \[native.initchain\]" "$WORK/out.plain")" == *"module account: $REWARDS_MODULE_ADDR"* ]]; then
   pass "  and the chain names the same module account the checker does"
 else
   fail "  and the chain names the same module account the checker does" \
@@ -702,7 +750,7 @@ elif alive "$probe"; then
   fail "a probe that ignores SIGTERM is killed, not waited on" "the probe was still running after the checker exited"
 elif (( t1 - t0 > 30 )); then
   fail "a probe that ignores SIGTERM is killed, not waited on" "the checker took $((t1 - t0))s — it waited on the probe"
-elif ! sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "PASS  \[native.initchain\]"; then
+elif ! out_has "PASS  \[native.initchain\]"; then
   fail "a probe that ignores SIGTERM is killed, not waited on" "the dry-run did not complete: $(tail -2 "$WORK/out")"
 elif [[ -n "$(leftovers)" ]]; then
   fail "a probe that ignores SIGTERM is killed, not waited on" "the probe home was left behind: $(leftovers)"
