@@ -213,6 +213,9 @@ func (q queryServer) CurrentEpochActiveBlocks(ctx context.Context, req *types.Qu
 	if req != nil {
 		pageReq = req.Pagination
 	}
+	if err := pageRequestError(pageReq); err != nil {
+		return nil, err
+	}
 	// ActiveBlocks is keyed (epoch, slotID); prefix by the open epoch yields
 	// ascending slotID order.
 	blocks, pageRes, err := query.CollectionPaginate(
@@ -223,8 +226,8 @@ func (q queryServer) CurrentEpochActiveBlocks(ctx context.Context, req *types.Qu
 		query.WithCollectionPaginationPairPrefix[uint64, uint64](state.CurrentEpoch),
 	)
 	if err != nil {
-		// A malformed page request already carries InvalidArgument and passes
-		// through; a counter that will not decode does not, and is Internal.
+		// The paginator's own refusals are caught above; what remains is a
+		// counter that will not decode, which is Internal.
 		return nil, canonicalStateQueryError("open-epoch active block counts", err)
 	}
 	return &types.QueryCurrentEpochActiveBlocksResponse{EpochNumber: state.CurrentEpoch, ActiveBlocks: blocks, Pagination: pageRes}, nil
@@ -384,10 +387,26 @@ func canonicalStateQueryError(what string, err error) error {
 	if err == nil {
 		return nil
 	}
+	// A canceled or timed-out query is the transport's doing, not the chain's,
+	// and carries no gRPC status of its own; it must not be relabelled as a
+	// damaged node.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	if _, ok := status.FromError(err); ok && status.Code(err) != codes.Unknown {
 		return err
 	}
 	return status.Errorf(codes.Internal, "canonical %s could not be read: %v", what, err)
+}
+
+// pageRequestError refuses the one page request shape the SDK paginator rejects
+// with a plain error: an offset and a key together. Left to the paginator, that
+// caller mistake would arrive as a read failure and be classified Internal.
+func pageRequestError(page *query.PageRequest) error {
+	if page != nil && page.Offset != 0 && len(page.Key) != 0 {
+		return status.Error(codes.InvalidArgument, "a page request may set an offset or a key, not both")
+	}
+	return nil
 }
 
 // EpochConfigVersions returns the canonical epoch-configuration history together
@@ -413,6 +432,9 @@ func (q queryServer) EpochConfigVersions(
 		historyPage = req.Pagination
 		startEpoch = req.ScheduledStartEpoch
 		limit = req.ScheduledLimit
+	}
+	if err := pageRequestError(historyPage); err != nil {
+		return nil, err
 	}
 	versions, pageRes, err := query.CollectionPaginate(
 		ctx, q.Keeper.EpochConfigVersions, historyPage,

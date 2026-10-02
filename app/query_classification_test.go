@@ -13,6 +13,7 @@ import (
 	storetypes "cosmossdk.io/store/types"
 
 	grpctypes "github.com/cosmos/cosmos-sdk/types/grpc"
+	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/app"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
@@ -99,6 +100,15 @@ func malformedCases() []classificationCase {
 			&miningtypes.QueryOpenSettlementsRequest{SlotId: 0}, codes.InvalidArgument},
 		{"rewards epoch zero", "/twilight.rewards.v1.Query/EpochBoundaries",
 			&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 0}, codes.InvalidArgument},
+		// An offset and a key together is the one page request the SDK paginator
+		// refuses with a plain error; it is the caller's mistake, not a damaged
+		// node, and must not arrive as Internal.
+		{"coreslot slots paged by offset and key at once", "/twilight.coreslot.v1.Query/CoreSlots",
+			&coreslottypes.QueryCoreSlotsRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
+		{"rewards active blocks paged by offset and key at once", "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
+			&rewardstypes.QueryCurrentEpochActiveBlocksRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
+		{"rewards epoch config versions paged by offset and key at once", "/twilight.rewards.v1.Query/EpochConfigVersions",
+			&rewardstypes.QueryEpochConfigVersionsRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
 	}
 }
 
@@ -295,12 +305,18 @@ func corruptionCases() []corruptionCase {
 			req: &rewardstypes.QueryParamsRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
 		{name: "rewards state undecodable, cumulative emitted", method: "/twilight.rewards.v1.Query/CumulativeEmitted",
 			req: &rewardstypes.QueryCumulativeEmittedRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards params undecodable, cumulative emitted", method: "/twilight.rewards.v1.Query/CumulativeEmitted",
+			req: &rewardstypes.QueryCumulativeEmittedRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
 		{name: "rewards params undecodable, next halving", method: "/twilight.rewards.v1.Query/NextHalving",
 			req: &rewardstypes.QueryNextHalvingRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
 		{name: "rewards params undecodable, supply schedule", method: "/twilight.rewards.v1.Query/SupplySchedule",
 			req: &rewardstypes.QuerySupplyScheduleRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
+		{name: "rewards state undecodable, supply schedule", method: "/twilight.rewards.v1.Query/SupplySchedule",
+			req: &rewardstypes.QuerySupplyScheduleRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
 		{name: "rewards state undecodable, current epoch active blocks", method: "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
 			req: &rewardstypes.QueryCurrentEpochActiveBlocksRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards active block counter undecodable", method: "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
+			req: &rewardstypes.QueryCurrentEpochActiveBlocksRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ActiveBlocksPrefix)},
 		{name: "rewards state undecodable, epoch info (control)", method: "/twilight.rewards.v1.Query/EpochInfo",
 			req: &rewardstypes.QueryEpochInfoRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
 		{name: "rewards finalized epoch undecodable", method: "/twilight.rewards.v1.Query/EpochReward",
@@ -339,15 +355,14 @@ func corruptFirstStoredValue(t *testing.T, chain *pinnedChain, storeKey string, 
 //
 // A block cannot carry the damage: every one of these faults is on a path the
 // block itself reads, and the chain is fail-closed, so FinalizeBlock would refuse
-// rather than commit it. The multistore is committed directly instead, twice:
-// a query pinned to a height below the latest reads that height's version from
-// the store, whereas a query at the latest height is answered from the block
-// states the application keeps alongside, which no block has produced here.
+// rather than commit it. The multistore is committed directly instead, and the
+// query is then pinned to that height. It must be pinned: a query for "latest"
+// is checked against the block header the application keeps for its last
+// block, which no block has produced for this version, and is refused before it
+// reads anything.
 func commitDamaged(t *testing.T, chain *pinnedChain) int64 {
 	t.Helper()
-	damaged := chain.app.CommitMultiStore().Commit().Version
-	chain.app.CommitMultiStore().Commit()
-	return damaged
+	return chain.app.CommitMultiStore().Commit().Version
 }
 
 // TestQueriesClassifyCorruptionAsInternal is the arm a read surface must get
@@ -358,9 +373,9 @@ func commitDamaged(t *testing.T, chain *pinnedChain) int64 {
 // query answers normally on the undamaged chain, so the Internal that follows is
 // attributable to the damage and not to the case being unanswerable anyway.
 //
-// Before #199, three of these answered NotFound (a dangling index entry was
-// reported as absence) and seven answered Unknown (a keeper's error returned raw,
-// or a registered sentinel passed through with the SDK's default code).
+// Before #199, two of these answered NotFound (a dangling index entry was
+// reported as absence) and eight answered Unknown (a keeper's error returned
+// raw, or a registered sentinel passed through with the SDK's default code).
 func TestQueriesClassifyCorruptionAsInternal(t *testing.T) {
 	for _, testCase := range corruptionCases() {
 		t.Run(testCase.name, func(t *testing.T) {

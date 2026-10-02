@@ -170,6 +170,12 @@ func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsReq
 		pageReq = req.Pagination
 		status = req.Status
 	}
+	// The one page request the SDK paginator refuses with a plain error, an
+	// offset and a key together, is the caller's mistake; left to the paginator
+	// it would arrive as a read failure and be classified Internal.
+	if pageReq != nil && pageReq.Offset != 0 && len(pageReq.Key) != 0 {
+		return nil, grpcStatusError{code: codes.InvalidArgument, err: fmt.Errorf("a page request may set an offset or a key, not both")}
+	}
 
 	slots, pageRes, err := query.CollectionFilteredPaginate(
 		ctx,
@@ -329,9 +335,9 @@ func (q queryServer) PendingAuthorityTransfers(ctx context.Context, _ *types.Que
 	err := q.PendingAuthority.Walk(ctx, nil, func(key int32, transfer types.PendingAuthorityTransfer) (bool, error) {
 		role := types.AuthorityRole(key)
 		if _, err := authorityRoleKey(role); err != nil {
-			// A plain error, deliberately not the wrapped module sentinel: a
-			// registered SDK error carries its own GRPCStatus (Unknown), which
-			// mandatoryStateError would pass through instead of classifying.
+			// A plain error rather than the module sentinel: the sentinel's own
+			// code is Unknown, which mandatoryStateError now classifies as
+			// Internal too, but this is not a transition the sentinel describes.
 			return true, fmt.Errorf("a nomination is stored under key %d, which is not an authority role", key)
 		}
 		if _, err := sdk.AccAddressFromBech32(transfer.Nominee); err != nil {
