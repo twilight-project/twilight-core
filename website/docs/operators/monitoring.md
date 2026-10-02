@@ -32,9 +32,11 @@ enabled = true
 # created when this is > 0. Every gauge below is refreshed once per commit, so keep
 # this comfortably above the block interval.
 prometheus-retention-time = 60
-# Keep both false: a hostname prefix changes the NAME of every gauge below to
-# <host>_twilight_..., which breaks every rule written against them. Use
-# enable-hostname-label = true if you want the host as a label instead.
+# Keep both false. A hostname prefix changes the NAME of every gauge below to
+# <host>_twilight_..., which breaks every rule written against them. The hostname
+# label adds `host` to every series, a label scrape configurations commonly stamp
+# on targets: Prometheus then keeps the target's and renames this one to
+# exported_host. The target's `instance` label already identifies the node.
 enable-hostname = false
 enable-hostname-label = false
 # Leave empty for the same reason: a service name is prepended to every metric name.
@@ -220,14 +222,21 @@ across the upgrade normalizes them first:
 
 ```promql
 max by (authority_role) (
-  label_replace(
-    label_replace(twilight_coreslot_pending_authority_nomination,
-      "authority_role", "$1", "exported_role", "(.+)"),
-    "authority_role", "$1", "role", "(primary|emergency)")
+    label_replace(
+      label_replace(twilight_coreslot_pending_authority_nomination{authority_role=""},
+        "authority_role", "$1", "role", "(.+)"),
+      "authority_role", "$1", "exported_role", "(.+)")
+  or
+    twilight_coreslot_pending_authority_nomination{authority_role!=""}
 ) == 1
 ```
 
-Once every node is upgraded, the plain expression under "Alerts worth having" is enough.
+Only series without `authority_role` are rewritten, and `exported_role` wins over `role`
+when both are present. That order matters when a target's own `role` is itself `primary`
+or `emergency` (primary/backup naming): taking `role` at face value there would report the
+wrong authority, or collapse both series into one label set and make the rule fail to
+evaluate. Once every node is upgraded, the plain expression under "Alerts worth having"
+is enough.
 
 ### Exporter health
 

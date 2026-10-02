@@ -60,7 +60,7 @@ func pendingEntry(role types.AuthorityRole, nominee string, height int64) *types
 }
 
 // requireGaugeAgrees holds the query to the telemetry gauge an operator alerts on
-// (twilight_coreslot_pending_authority_nomination{role}). The gauge says a
+// (twilight_coreslot_pending_authority_nomination{authority_role}). The gauge says a
 // handover is open and the query says to whom; if they could disagree, the alert
 // would point at an answer that denies it.
 func requireGaugeAgrees(t *testing.T, k keeper.Keeper, ctx sdk.Context, transfers []*types.PendingAuthorityTransferEntry) {
