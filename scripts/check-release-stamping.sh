@@ -178,18 +178,24 @@ check "probe go env file sets GOFLAGS"      "-tags=upgradedrill" "$(GOENV="$GOEN
 GOENV="$GOENV_PROBE" make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
 check "release builds under the probe"      "0" "$rc"
 check "three artifacts under the probe"     "3" "$(ls build/release/twilightd-v9.9.9-* 2>/dev/null | wc -l | tr -d ' ')"
-# The build info is read into a variable, not piped into grep. This check
-# expects ZERO matches, so the usual pipefail race (grep -q exits at its match,
-# the writer dies of SIGPIPE, the pipeline reads as "no match") would fail it in
-# the PASS direction: a tag leak would go uncounted. For the same reason a build
-# info that cannot be read is counted and failed, not taken as "no tags" (#222).
+# "Adds no build tags" passes on ZERO matches, so anything that loses a match
+# passes it for the wrong reason: a build info that was not read, or read only in
+# part, or a matcher that never ran. So the build info is read into a variable
+# and matched inside bash, with no pipe and no here-string between the two (a
+# `go version -m … | grep -q` under pipefail reports a match as a miss once the
+# output outgrows a pipe; a here-string needs a temp file that can fail to be
+# created). And "was read" means go exited 0 AND the output reaches the GOOS
+# build setting, which sorts after -tags: an artifact that is missing, not a Go
+# binary, or cut short is counted as unread and failed, not taken as "no tags"
+# (#222).
 leaked=0; tagged=0; unread=0
 for a in build/release/twilightd-v9.9.9-*; do
-  [[ -e "$a" ]] || continue
-  grep -aqF 'drill-v2' "$a" && leaked=$((leaked + 1))
-  info="$(go version -m "$a" 2>/dev/null || true)"
-  [[ -n "$info" ]] || unread=$((unread + 1))
-  grep -q -- '-tags=' <<<"$info" && tagged=$((tagged + 1))
+  grep -aqF 'drill-v2' "$a" 2>/dev/null && leaked=$((leaked + 1))
+  if info="$(go version -m "$a" 2>/dev/null)" && [[ "$info" == *$'\tbuild\tGOOS='* ]]; then
+    [[ "$info" == *-tags=* ]] && tagged=$((tagged + 1))
+  else
+    unread=$((unread + 1))
+  fi
 done
 check "go env file leaks no drill handler"  "0" "$leaked"
 check "every artifact's build info was read" "0" "$unread"
@@ -264,8 +270,7 @@ check "every artifact carries the commit" "3" "$stamped_all"
 flags_all=0
 for a in build/release/twilightd-v9.9.9-*; do
   info="$(go version -m "$a" 2>/dev/null || true)"
-  grep -q 'trimpath=true' <<<"$info" \
-    && grep -q 'CGO_ENABLED=0' <<<"$info" \
+  [[ "$info" == *trimpath=true* && "$info" == *CGO_ENABLED=0* ]] \
     && flags_all=$((flags_all + 1))
 done
 check "every artifact is trimpath+CGO0"   "3" "$flags_all"
