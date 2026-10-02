@@ -178,13 +178,21 @@ check "probe go env file sets GOFLAGS"      "-tags=upgradedrill" "$(GOENV="$GOEN
 GOENV="$GOENV_PROBE" make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
 check "release builds under the probe"      "0" "$rc"
 check "three artifacts under the probe"     "3" "$(ls build/release/twilightd-v9.9.9-* 2>/dev/null | wc -l | tr -d ' ')"
-leaked=0; tagged=0
+# The build info is read into a variable, not piped into grep. This check
+# expects ZERO matches, so the usual pipefail race (grep -q exits at its match,
+# the writer dies of SIGPIPE, the pipeline reads as "no match") would fail it in
+# the PASS direction: a tag leak would go uncounted. For the same reason a build
+# info that cannot be read is counted and failed, not taken as "no tags" (#222).
+leaked=0; tagged=0; unread=0
 for a in build/release/twilightd-v9.9.9-*; do
   [[ -e "$a" ]] || continue
   grep -aqF 'drill-v2' "$a" && leaked=$((leaked + 1))
-  go version -m "$a" 2>/dev/null | grep -q -- '-tags=' && tagged=$((tagged + 1))
+  info="$(go version -m "$a" 2>/dev/null || true)"
+  [[ -n "$info" ]] || unread=$((unread + 1))
+  grep -q -- '-tags=' <<<"$info" && tagged=$((tagged + 1))
 done
 check "go env file leaks no drill handler"  "0" "$leaked"
+check "every artifact's build info was read" "0" "$unread"
 check "go env file adds no build tags"      "0" "$tagged"
 rm -rf "$(dirname "$GOENV_PROBE")" build/release
 
@@ -255,8 +263,9 @@ done
 check "every artifact carries the commit" "3" "$stamped_all"
 flags_all=0
 for a in build/release/twilightd-v9.9.9-*; do
-  go version -m "$a" 2>/dev/null | grep -q 'trimpath=true' \
-    && go version -m "$a" 2>/dev/null | grep -q 'CGO_ENABLED=0' \
+  info="$(go version -m "$a" 2>/dev/null || true)"
+  grep -q 'trimpath=true' <<<"$info" \
+    && grep -q 'CGO_ENABLED=0' <<<"$info" \
     && flags_all=$((flags_all + 1))
 done
 check "every artifact is trimpath+CGO0"   "3" "$flags_all"
