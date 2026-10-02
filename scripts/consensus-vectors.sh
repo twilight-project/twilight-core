@@ -37,11 +37,13 @@ missing=0
 for entry in "${REQUIRED[@]}"; do
   pkg="${entry%%:*}"
   test_name="${entry##*:}"
-  # Collected into a variable rather than piped: under `pipefail`, `grep -q`
-  # exits at the first match and the resulting SIGPIPE would fail the pipeline
-  # precisely when the test DOES exist.
+  # Collected into a variable and matched from a here-string, never piped:
+  # under `pipefail`, `grep -q` exits at the first match and the resulting
+  # SIGPIPE would fail the pipeline precisely when the test DOES exist. Printing
+  # the variable into a pipe is the same race, because printf writes the listing
+  # one line at a time and the "ok" line follows the match.
   listing="$(go test -list "^${test_name}\$" "${pkg}" 2>/dev/null || true)"
-  if ! printf '%s\n' "${listing}" | grep -qx "${test_name}"; then
+  if ! grep -qx "${test_name}" <<<"${listing}"; then
     echo "consensus-vectors: FAIL required test ${test_name} not found in ${pkg}" >&2
     missing=1
   fi

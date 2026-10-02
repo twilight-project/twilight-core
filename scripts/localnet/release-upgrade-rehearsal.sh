@@ -126,10 +126,16 @@ cleanup() {
 # log finds the node's original halt and would pass on a node that never restarted
 # at all. The offset is recorded before the restart, and the log is not truncated,
 # so the earlier evidence survives.
+#
+# The tail is captured, not piped into grep: under pipefail, `tail … | grep -q`
+# kills tail with SIGPIPE whenever more log follows the match than a pipe holds,
+# and a marker that IS there reads as "no" (#222).
 fresh_marker_after() { # <node> <offset> <pattern> -> yes|no
   local f="$NET/logs/node$1.log"
   [[ -f "$f" ]] || { echo "no"; return; }
-  if tail -c "+$(( $2 + 1 ))" "$f" 2>/dev/null | grep -qE "$3"; then echo yes; else echo no; fi
+  local fresh
+  fresh="$(tail -c "+$(( $2 + 1 ))" "$f" 2>/dev/null || true)"
+  if grep -qE "$3" <<<"$fresh"; then echo yes; else echo no; fi
 }
 log_size() { local f="$NET/logs/node$1.log"; [[ -f "$f" ]] && wc -c <"$f" | tr -d ' ' || echo 0; }
 

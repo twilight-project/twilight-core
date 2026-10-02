@@ -216,12 +216,16 @@ check_absent /cosmos/distribution/v1beta1/params
 echo
 echo "-- gRPC reflection (optional; needs grpcurl) --"
 if command -v grpcurl >/dev/null 2>&1; then
-  if grpcurl -plaintext "$BASE_GRPC" list 2>/dev/null | grep -q 'twilight.rewards.v1.Query'; then
+  # Listed once into a variable, not piped into each grep: under pipefail a
+  # `grpcurl … | grep -q` that matches before the last service line is written
+  # kills grpcurl with SIGPIPE and reports a listed service as missing (#222).
+  grpc_services="$(grpcurl -plaintext "$BASE_GRPC" list 2>/dev/null || true)"
+  if grep -q 'twilight.rewards.v1.Query' <<<"$grpc_services"; then
     echo "  ok    twilight.rewards.v1.Query listed"; pass=$((pass+1))
   else
     echo "  FAIL  twilight.rewards.v1.Query not listed"; fail=$((fail+1))
   fi
-  if grpcurl -plaintext "$BASE_GRPC" list 2>/dev/null | grep -q 'twilight.coreslot.v1.Query'; then
+  if grep -q 'twilight.coreslot.v1.Query' <<<"$grpc_services"; then
     echo "  ok    twilight.coreslot.v1.Query listed"; pass=$((pass+1))
   else
     echo "  FAIL  twilight.coreslot.v1.Query not listed"; fail=$((fail+1))
