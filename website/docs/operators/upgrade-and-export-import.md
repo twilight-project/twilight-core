@@ -4,6 +4,97 @@ title: Upgrade & Export/Import
 
 # Upgrade & Export/Import
 
+## On-chain upgrades
+
+The chain wires the standard `x/upgrade` module. Only the CoreSlot authority can
+schedule or cancel a plan; there is no governance module, and none is needed
+(design record: ADR-0003 in the repository's `docs/architecture/adr/`).
+
+```bash
+# the authority schedules a plan: a handler name, the halt height, free-form info
+twilightd coreslot schedule-upgrade <name> <height> <info> --from <authority-key> --chain-id <chain-id> --node <rpc>
+twilightd coreslot cancel-upgrade --from <authority-key> --chain-id <chain-id> --node <rpc>
+
+# anyone can read it
+twilightd query upgrade plan --node <rpc>
+twilightd query upgrade applied <name> --node <rpc>     # the height a past upgrade ran at
+twilightd query upgrade module-versions --node <rpc>
+```
+
+### Two kinds of change, two procedures
+
+| | Node-local | State machine |
+|---|---|---|
+| Examples | pruning, RPC and API settings, indexer, log level, p2p tuning, metrics, hardware | `x/coreslot`, `x/rewards`, `x/mining`, `app/` wiring, parameter structure, proto, the module-account set |
+| Release | **patch** (`v0.3.1`), or a release candidate of the same line | **minor** (`v0.4.0`), with a registered handler named after the version it upgrades to |
+| Procedure | restart one validator at a time | every node halts at the scheduled height, swaps, resumes |
+| Downtime | none | seconds, if every operator has staged the binary |
+
+Two nodes running different state-machine logic at the same height compute different
+application hashes. That is why the right-hand column cannot roll one node at a time,
+and why the left-hand column must never be used for it.
+
+### What happens at the height
+
+1. The plan is committed. From that block until the height, a node that is **already**
+   running a binary containing the named handler aborts every block it tries to
+   process. Do not swap early.
+2. At the height, every node refuses the block: the process stays up and answers RPC,
+   but its application height stops. A validator left on the old binary stays stopped
+   rather than following the network with the old logic.
+3. Each operator starts the new binary. It runs the handler once, in a cache context
+   that commits only on complete success, then continues.
+4. The chain produces blocks again once more than two-thirds of the voting power is
+   back. With four validators, three suffice and the fourth catches up; with fewer, every
+   operator must complete the swap before any block is produced.
+
+The settlement clock advances only on blocks that are produced, so a halt freezes every
+open settlement window. Nothing expires while the network is down, however long that is.
+
+### Operator procedure
+
+- Run `twilightd` under Cosmovisor, with `DAEMON_ALLOW_DOWNLOAD_BINARIES=false`. A node
+  holding balances must never fetch and execute a binary named by an on-chain message.
+- Before the height: download the release, verify its SHA-256 against the published
+  checksums, and place it where Cosmovisor expects the binary for the plan's name. Do
+  not run it.
+- After the swap: confirm `query upgrade applied <name>` returns the upgrade height, that
+  your node's application hash matches its peers, and that it is signing again.
+- `--unsafe-skip-upgrades <height>` makes a node skip a plan. It is a network-wide
+  decision: a node that uses it alone computes different state from the rest and forks.
+
+### Scheduling constraints (for the authority)
+
+- **Never schedule an upgrade at an epoch boundary.** The handler runs at the start of
+  the upgrade height and epoch finalization at its end; a boundary height puts a
+  migration and an epoch close in one block, on the money-critical path. Schedule
+  comfortably mid-epoch (on the public testnet an epoch is 360 blocks).
+- Pre-stage and hash-verify the binary **before** submitting the plan, and check the
+  plan's name against the handler that release ships. A plan naming a handler no binary
+  has is recoverable: it is visible in `query upgrade plan`, and the authority can cancel
+  it any time before the height.
+- For a migration that touches rewards or mining state, consider a rewards pause first.
+  It stops accrual and release together and freezes the settlement clock, which gives a
+  quiescent state to migrate from.
+
+### What is proven, and what is not
+
+The mechanism is covered by application tests and by a four-validator localnet drill
+with two separately built binaries (`make localnet-upgrade-drill`): every validator halts
+at the same height, the upgraded nodes agree on the application hash across the
+boundary, a validator left on the old binary fails closed, the settlement clock does not
+consume the downtime, and the migration runs exactly once. Two handlers are registered,
+`v0.2.0` and `v0.3.0`.
+
+Not yet exercised: store-layout changes (adding, renaming or deleting a store), and
+Cosmovisor itself, which the drill swaps by hand so that a tooling failure cannot be
+mistaken for a chain one. No upgrade of a running public network is recorded.
+
+One consequence to plan for: a single latest binary cannot replay the chain from genesis
+across an upgrade boundary. Recovery and replay use either the historical sequence of
+binaries, which Cosmovisor keeps, or a validated snapshot or state sync taken after the
+boundary.
+
 ## Exporting state
 
 ```bash
@@ -49,9 +140,6 @@ twilightd rewards-query epoch-reward <finalized-epoch> --node <rpc>
 Then advance one block and confirm the chain continues to finalize epochs
 coherently.
 
-:::warning On-chain upgrades not yet supported
-A coordinated **on-chain upgrade** procedure (handler / store migration) is not
-part of the current implementation. The rewards store key and proto are stable;
-any future upgrade must preserve the immutable `native_denom` / `max_supply` and
-the finalized epoch and entitlement history. This tooling is not available in the current implementation.
-:::
+Export and restore is the disaster path, not the upgrade path: it is what remains when a
+network cannot resume. Any upgrade or restore must preserve the immutable `native_denom`
+and `max_supply` and the finalized epoch and entitlement history.

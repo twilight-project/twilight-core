@@ -45,8 +45,12 @@ Each behavior below is exercised by the evidence type named next to it.
 - **Multi-day cross-host endurance is not yet done.** Cross-host coverage to date
   is the fault-tolerance drills above plus single-host endurance soak; a sustained
   multi-day run across hosts is still pending.
-- **The production on-chain upgrade procedure is not yet exercised** (upgrade
-  handlers and store migrations).
+- **On-chain upgrades are not yet exercised on a public network.** `x/upgrade` is
+  wired and scheduled only by the CoreSlot authority; the mechanism is covered by
+  application tests and a four-validator localnet drill with two separately built
+  binaries. Not yet exercised: store-layout changes (adding, renaming or deleting a
+  store) and Cosmovisor itself, which the drill swaps by hand. See
+  [Upgrade & Export/Import](../operators/upgrade-and-export-import.md).
 - **Weighted rewards and fee-funded rewards are not active.** They are code-gated
   and rejected until implemented. The reward weight recorded on an entitlement is
   metadata only and has no payout effect — payout is by
