@@ -241,6 +241,31 @@ func emitCoreSlotTelemetry(snap coreslotkeeper.TelemetrySnapshot) {
 	setGauge(module, "pending_key_rotations", float32(snap.PendingKeyRotations))
 	setRoleGauge(module, "pending_authority_nomination", "primary", snap.PrimaryNominationPending)
 	setRoleGauge(module, "pending_authority_nomination", "emergency", snap.EmergencyNominationPending)
+	emitAuthorityInfo(module, snap.Authority, snap.EmergencyAuthority)
+}
+
+// emitAuthorityInfo sets twilight_coreslot_authority_info{authority,
+// emergency_authority} = 1: who holds each role, as labels, so that "the
+// authority changed" is something Prometheus can alert on.
+//
+// The nomination gauge cannot be that alert. A key holder can nominate and
+// accept in the same block, and then no committed height ever has a nomination
+// pending. Whatever order a rotation takes, the addresses end up different, and
+// a rule that matches any series whose addresses are not the recorded ones
+// fires on the first scrape of the new series.
+//
+// It is one series per commit. On a rotation the series with the old addresses
+// stops being refreshed and the sink expires it after the retention window, so
+// for that long a node exports both.
+func emitAuthorityInfo(module, authority, emergencyAuthority string) {
+	telemetry.SetGaugeWithLabels(
+		[]string{telemetryNamespace, module, "authority_info"},
+		1,
+		[]metrics.Label{
+			telemetry.NewLabel("authority", authority),
+			telemetry.NewLabel("emergency_authority", emergencyAuthority),
+		},
+	)
 }
 
 func setGauge(module, name string, value float32) {
