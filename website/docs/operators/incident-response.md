@@ -29,24 +29,60 @@ half-committing.
 2. Confirm the committed height did not advance and no partial epoch was written
    (`epoch-info`, `epoch-reward`).
 3. Resolve the underlying fault (e.g. a CoreSlot/rewards state inconsistency).
-   The emergency authority can `pause --settlement` to stop finalization attempts
-   while investigating; counting continues and re-enabling finalizes once.
+   A pause is not a tool for this. No transaction can be included while the
+   chain is halted, and a pause would not stop finalization anyway: the boundary
+   is unconditional (see
+   [Security & Failure Modes](../rewards/security-and-failure-modes.md)).
 
-## Settlement paused unexpectedly
+## Rewards paused unexpectedly
+
+Read the canonical pause state, not `params`:
 
 ```bash
-twilightd rewards-query params --node <rpc> --output json | jq .epoch_settlement_enabled
+twilightd rewards-query pause-state --node <rpc> --output json
 ```
 
-If `false` and unintended, `resume --settlement` via the emergency authority. The
-open epoch finalizes once at the first enabled EndBlock past its boundary.
+```json
+{
+  "pause_state": {
+    "current_paused": true,
+    "has_pending": false,
+    "pending_value": false,
+    "pending_effective_height": "0"
+  },
+  "release_enabled": false
+}
+```
+
+`current_paused` is the state in force; `has_pending`, `pending_value` and
+`pending_effective_height` describe a pause or resume that takes effect at the
+next block; `release_enabled` is whether settlement releases are accepted now.
+
+:::warning Do not read `params` for this
+`emissions_enabled`, `epoch_settlement_enabled` and `claims_enabled` in
+`rewards-query params` are retired fields that carry no authority. They read
+`true` on a paused chain.
+:::
+
+If paused and unintended, the emergency authority resumes:
+
+```bash
+twilightd rewards resume --from <emergency-authority-key> --chain-id <chain-id> --node <rpc>
+```
+
+A pause is global, so there are no flags to match, and `rewards pause` and
+`rewards resume` take none. Both take effect at the next block. Blocks produced
+while paused earned nothing and are not repaid; the settlement clock was frozen
+for the same blocks, so no settlement window was consumed. Epochs that closed while
+paused finalized at their boundary as usual, with only the blocks before the pause
+counted.
 
 ## Releases failing for everyone
 
-Check the canonical pause state. If paused intentionally (incident containment),
-communicate the window; if not, `resume` via the emergency authority. Individual
-settlement rejections are not incidents — see
-[Troubleshooting](../rewards/troubleshooting.md).
+Check the canonical pause state (`rewards-query pause-state`, above). If paused
+intentionally (incident containment), communicate the window; if not, `rewards
+resume` via the emergency authority. Individual settlement rejections are not
+incidents — see [Troubleshooting](../rewards/troubleshooting.md).
 
 ## Wrong params queued
 
