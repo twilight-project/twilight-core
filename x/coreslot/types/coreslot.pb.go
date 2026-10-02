@@ -154,8 +154,9 @@ func (m *PendingAuthorityTransfer) GetNominatedHeight() int64 {
 	return 0
 }
 
-// PendingAuthorityTransferEntry pairs a transfer with its role for genesis,
-// where there is no collection key to carry it.
+// PendingAuthorityTransferEntry pairs a transfer with its role wherever the
+// collection key that carries the role in state is absent: in genesis, and in
+// the pending-authority-transfers query response.
 type PendingAuthorityTransferEntry struct {
 	Role     AuthorityRole             `protobuf:"varint,1,opt,name=role,proto3,enum=twilight.coreslot.v1.AuthorityRole" json:"role,omitempty"`
 	Transfer *PendingAuthorityTransfer `protobuf:"bytes,2,opt,name=transfer,proto3" json:"transfer,omitempty"`

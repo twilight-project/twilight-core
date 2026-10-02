@@ -134,6 +134,17 @@ check_custom /twilight/coreslot/v1/slots/1/selection-policy/version/1
 check_custom /twilight/coreslot/v1/slots/1/selection-policy/height/1
 check_custom /twilight/coreslot/v1/pending-key-rotations
 check_custom /twilight/coreslot/v1/last-applied-validators
+# Pending authority nominations: must be a 200 whose body carries a `transfers`
+# array — an explicit empty list when nothing is pending, never a 404 and never a
+# body without the field. check_custom would pass a 404, so this checks both.
+pat_path=/twilight/coreslot/v1/pending-authority-transfers
+pat_code="$(code "$BASE_REST$pat_path")"
+if [[ "$pat_code" == "200" ]] \
+  && body "$BASE_REST$pat_path" | jq -e '.transfers | type == "array"' >/dev/null 2>&1; then
+  printf '  ok    %-52s -> %s\n' "$pat_path" "$pat_code"; pass=$((pass+1))
+else
+  printf '  FAIL  %-52s -> %s (need 200 with a transfers array)\n' "$pat_path" "$pat_code"; fail=$((fail+1))
+fi
 
 echo
 echo "-- x/coreslot parameterized routes (real fixtures, expect 200) --"

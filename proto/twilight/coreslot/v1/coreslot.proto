@@ -39,8 +39,9 @@ message PendingAuthorityTransfer {
   int64 nominated_height = 2;
 }
 
-// PendingAuthorityTransferEntry pairs a transfer with its role for genesis,
-// where there is no collection key to carry it.
+// PendingAuthorityTransferEntry pairs a transfer with its role wherever the
+// collection key that carries the role in state is absent: in genesis, and in
+// the pending-authority-transfers query response.
 message PendingAuthorityTransferEntry {
   AuthorityRole role = 1;
   PendingAuthorityTransfer transfer = 2;

@@ -49,6 +49,12 @@ service Query {
   rpc SelectionPolicyAtHeight(QuerySelectionPolicyAtHeightRequest) returns (QuerySelectionPolicyResponse) {
     option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/selection-policy/height/{at_height}";
   }
+  // PendingAuthorityTransfers returns every authority nomination awaiting
+  // acceptance, for both roles in one answer. No nomination is an empty list and
+  // a success, never NotFound.
+  rpc PendingAuthorityTransfers(QueryPendingAuthorityTransfersRequest) returns (QueryPendingAuthorityTransfersResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/pending-authority-transfers";
+  }
 }
 
 message QueryParamsRequest {}
@@ -91,3 +97,17 @@ message QuerySelectionPolicyAtHeightRequest {
   int64 at_height = 2;
 }
 message QuerySelectionPolicyResponse { SelectionPolicyVersion policy = 1; }
+
+// The request takes no role. The state holds at most one nomination per role,
+// so returning both is as cheap as returning one, and a caller cannot ask about
+// the wrong role and read "nothing pending" as reassurance about the other.
+message QueryPendingAuthorityTransfersRequest {}
+// transfers holds one entry per role that has a nomination in flight, in role
+// order (primary, then emergency). Each entry names its role explicitly, so an
+// absent nomination is an absent entry rather than an entry whose fields happen
+// to be empty. An empty list means no handover is in flight for either role.
+//
+// The entry is the same message genesis exports, so a pending transfer has one
+// wire shape wherever it is read. The incumbent is not repeated here: it is
+// Params at the same height.
+message QueryPendingAuthorityTransfersResponse { repeated PendingAuthorityTransferEntry transfers = 1; }
