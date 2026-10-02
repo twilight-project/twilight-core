@@ -164,9 +164,11 @@ addresses you expect, and compare them against the chain:
 twilightd coreslot-query params --output json | jq '.params | {authority, emergency_authority}'
 ```
 
-Any difference is a rotation that happened. Every completed handover also emits a
-`coreslot_authority_accepted` event (`authority_role`, `previous_authority`, `authority`), so an
-indexer or event subscriber can catch the moment it happens.
+Any difference is a rotation that happened. Nodes with telemetry on export the same two addresses
+as the labels of `twilight_coreslot_authority_info`, so the comparison can be an alert rule (see the
+monitoring page); after a planned rotation, update the addresses that rule records. Every completed
+handover also emits a `coreslot_authority_accepted` event (`authority_role`, `previous_authority`,
+`authority`), so an indexer or event subscriber can catch the moment it happens.
 
 **The pending query, and its gauge, only see a nomination that waits.** Nodes export
 `twilight_coreslot_pending_authority_nomination{authority_role}`, which is 1 while a nomination is

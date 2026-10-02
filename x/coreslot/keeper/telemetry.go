@@ -29,6 +29,13 @@ type TelemetrySnapshot struct {
 	// canceled.
 	PrimaryNominationPending   bool
 	EmergencyNominationPending bool
+	// Authority and EmergencyAuthority are the addresses that hold each role
+	// now. The two flags above only see a nomination that waits: a nomination
+	// and its acceptance can land in the same block, and then no committed state
+	// ever shows one pending. The addresses themselves changing is the signal
+	// that cannot be missed (#200).
+	Authority          string
+	EmergencyAuthority string
 }
 
 // TelemetrySnapshot reads the validator-set state. A read failure is returned
@@ -43,6 +50,8 @@ func (k Keeper) TelemetrySnapshot(ctx context.Context) (TelemetrySnapshot, error
 	}
 	snap.MinActiveSlots = params.MinActiveSlots
 	snap.MaxActiveSlots = params.MaxActiveSlots
+	snap.Authority = params.Authority
+	snap.EmergencyAuthority = params.EmergencyAuthority
 
 	snap.ActiveSlots, err = k.activeCount(ctx)
 	if err != nil {

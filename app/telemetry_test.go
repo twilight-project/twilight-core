@@ -20,6 +20,10 @@ import (
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/telemetry"
+
+	"github.com/twilight-project/twilight-core/app"
+	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 // The telemetry contract.
@@ -228,32 +232,33 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 
 	values := gather()
 	expected := map[string]float64{
-		"twilight_rewards_current_epoch":                                                                        2,
-		"twilight_rewards_current_epoch_start_height":                                                           float64(epochLength + 1),
-		"twilight_rewards_current_epoch_end_height":                                                             float64(2 * epochLength),
-		"twilight_rewards_epoch_blocks_remaining":                                                               float64(epochLength - 2),
-		"twilight_rewards_open_reward_enabled_blocks":                                                           2,
-		"twilight_rewards_last_finalized_epoch":                                                                 1,
-		"twilight_rewards_cumulative_emitted_utwlt":                                                             gaugeOf(rewards.CumulativeEmitted),
-		"twilight_rewards_max_supply_utwlt":                                                                     gaugeOf(maxSupply),
-		"twilight_rewards_halving_tier":                                                                         0,
-		"twilight_rewards_next_halving_threshold_utwlt":                                                         gaugeOf(maxSupply.QuoRaw(2)),
-		"twilight_rewards_escrow_balance_utwlt":                                                                 gaugeOf(rewards.EscrowBalance),
-		"twilight_rewards_outstanding_entitlement_liability_utwlt":                                              gaugeOf(rewards.OutstandingLiability),
-		"twilight_rewards_carry_forward_remainder_utwlt":                                                        gaugeOf(rewards.CarryForwardRemainder),
-		"twilight_rewards_escrow_solvency_delta_utwlt":                                                          0,
-		"twilight_rewards_paused":                                                                               0,
-		"twilight_rewards_pause_transition_pending":                                                             0,
-		"twilight_rewards_release_enabled":                                                                      1,
-		"twilight_mining_settlement_clock":                                                                      float64(epochLength + 2),
-		"twilight_mining_last_processed_reward_epoch":                                                           1,
-		"twilight_coreslot_active_slots":                                                                        1,
-		"twilight_coreslot_min_active_slots":                                                                    float64(csParams.MinActiveSlots),
-		"twilight_coreslot_max_active_slots":                                                                    float64(csParams.MaxActiveSlots),
-		"twilight_coreslot_pending_key_rotations":                                                               0,
-		`twilight_coreslot_pending_authority_nomination{authority_role="emergency"}`:                            0,
-		`twilight_coreslot_pending_authority_nomination{authority_role="primary"}`:                              0,
-		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`: 1,
+		"twilight_rewards_current_epoch":                                             2,
+		"twilight_rewards_current_epoch_start_height":                                float64(epochLength + 1),
+		"twilight_rewards_current_epoch_end_height":                                  float64(2 * epochLength),
+		"twilight_rewards_epoch_blocks_remaining":                                    float64(epochLength - 2),
+		"twilight_rewards_open_reward_enabled_blocks":                                2,
+		"twilight_rewards_last_finalized_epoch":                                      1,
+		"twilight_rewards_cumulative_emitted_utwlt":                                  gaugeOf(rewards.CumulativeEmitted),
+		"twilight_rewards_max_supply_utwlt":                                          gaugeOf(maxSupply),
+		"twilight_rewards_halving_tier":                                              0,
+		"twilight_rewards_next_halving_threshold_utwlt":                              gaugeOf(maxSupply.QuoRaw(2)),
+		"twilight_rewards_escrow_balance_utwlt":                                      gaugeOf(rewards.EscrowBalance),
+		"twilight_rewards_outstanding_entitlement_liability_utwlt":                   gaugeOf(rewards.OutstandingLiability),
+		"twilight_rewards_carry_forward_remainder_utwlt":                             gaugeOf(rewards.CarryForwardRemainder),
+		"twilight_rewards_escrow_solvency_delta_utwlt":                               0,
+		"twilight_rewards_paused":                                                    0,
+		"twilight_rewards_pause_transition_pending":                                  0,
+		"twilight_rewards_release_enabled":                                           1,
+		"twilight_mining_settlement_clock":                                           float64(epochLength + 2),
+		"twilight_mining_last_processed_reward_epoch":                                1,
+		"twilight_coreslot_active_slots":                                             1,
+		"twilight_coreslot_min_active_slots":                                         float64(csParams.MinActiveSlots),
+		"twilight_coreslot_max_active_slots":                                         float64(csParams.MaxActiveSlots),
+		"twilight_coreslot_pending_key_rotations":                                    0,
+		`twilight_coreslot_pending_authority_nomination{authority_role="emergency"}`: 0,
+		`twilight_coreslot_pending_authority_nomination{authority_role="primary"}`:   0,
+		`twilight_coreslot_authority_info{authority="` + csParams.Authority + `",emergency_authority="` + csParams.EmergencyAuthority + `"}`: 1,
+		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`:                              1,
 	}
 	for name, want := range expected {
 		got, found := values[name]
@@ -273,6 +278,48 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		_, documented := expected[name]
 		require.True(t, documented, "metric %s is exported but not documented", name)
 	}
+}
+
+// The authority addresses are exported as labels because the nomination gauge
+// cannot see every rotation: a nomination and its acceptance can commit in the
+// same block, and then no committed height ever has a nomination pending. This
+// drives exactly that rotation and requires the nomination gauge to have stayed
+// at zero while the info series moved to the successor.
+func TestTelemetryAuthorityInfoFollowsASameBlockRotation(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, 2)
+
+	incumbent, emergency, successor := app.AuthorityAddress(), app.EmergencyAuthorityAddress(), acc(0x5a)
+	series := func(authority string) string {
+		return `twilight_coreslot_authority_info{authority="` + authority + `",emergency_authority="` + emergency + `"}`
+	}
+	const primaryPending = `twilight_coreslot_pending_authority_nomination{authority_role="primary"}`
+
+	before := gather()
+	require.Equal(t, float64(1), before[series(incumbent)], "the incumbent pair is not exported")
+	_, early := before[series(successor)]
+	require.False(t, early, "the successor is exported before any rotation")
+	require.Equal(t, float64(0), before[primaryPending])
+
+	// Both steps through the message server against the same uncommitted head,
+	// so the next block commits the nomination and its acceptance together.
+	ctx := chain.headContext()
+	ms := coreslotkeeper.NewMsgServer(chain.app.CoreSlotKeeper)
+	_, err := ms.NominateAuthority(ctx, &coreslottypes.MsgNominateAuthority{
+		Authority: incumbent, Role: coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY, Nominee: successor,
+	})
+	require.NoError(t, err)
+	_, err = ms.AcceptAuthority(ctx, &coreslottypes.MsgAcceptAuthority{
+		Nominee: successor, Role: coreslottypes.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
+	})
+	require.NoError(t, err)
+	chain.commitThrough(t, 3)
+
+	after := gather()
+	require.Equal(t, float64(1), after[series(successor)], "the info series did not follow the rotation")
+	require.Equal(t, float64(0), after[primaryPending],
+		"the nomination gauge saw a same-block rotation; if it now can, this test's premise needs restating")
 }
 
 // targetLabels are label names a scrape configuration commonly stamps on every
@@ -317,7 +364,7 @@ func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
 	}
 	// The labels this app is known to export. A test that saw none of them
 	// would pass by looking at nothing.
-	for _, name := range []string{"authority_role", "module", "version", "commit", "go_version"} {
+	for _, name := range []string{"authority_role", "authority", "emergency_authority", "module", "version", "commit", "go_version"} {
 		_, found := seen[name]
 		require.True(t, found, "no exported series carries the label %q, so this test did not look at it", name)
 	}

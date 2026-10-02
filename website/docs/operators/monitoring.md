@@ -186,6 +186,7 @@ counter is a consensus-state change and is tracked separately.
 | `twilight_coreslot_max_active_slots` | | Parameter | constant between parameter updates |
 | `twilight_coreslot_pending_key_rotations` | | Consensus-key rotations queued and not yet effective | 0 except during a rotation |
 | `twilight_coreslot_pending_authority_nomination` | `authority_role` = `primary` \| `emergency` | An authority handover is nominated and not yet accepted or canceled | 0 except during a handover |
+| `twilight_coreslot_authority_info` | `authority`, `emergency_authority` | Always 1. The labels are the addresses that hold each role now | one series, whose labels change only on a rotation |
 
 `twilight_coreslot_pending_authority_nomination` is the alertable signal for an
 authority handover: it is 1 from the block a nomination is committed until it is
@@ -258,15 +259,29 @@ testnet's 360-block epochs; scale to your epoch length.
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
 | Authority nomination pending | `max by (authority_role) (twilight_coreslot_pending_authority_nomination) == 1` | A handover is waiting to be accepted. Expected only during a planned rotation; otherwise an incident (there is no timelock: the nominee can accept in the next block). Page, then run `pending-authority-transfers` to see who is nominated. Blind to a same-block nominate + accept (see above) |
+| Authority changed | `twilight_coreslot_authority_info{authority!="<primary>"} or twilight_coreslot_authority_info{emergency_authority!="<emergency>"}` | A role is held by an address you did not record. Fires on the first scrape after any rotation, in any order, including a nominate + accept in one block (see below) |
+| Authority gauge missing | `absent(twilight_coreslot_authority_info)` for 10 minutes | No node exports the gauge (an older build, or telemetry off), so the alert above matches nothing and is silent |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 
-**Authority changed:** no gauge carries the authority addresses yet, so this check runs
-outside Prometheus: on a schedule, compare `twilightd coreslot-query params`
-(`authority`, `emergency_authority`) against the addresses recorded when the network
-launched or last rotated, and page on any difference. This is the check that catches a
-stolen authority key, whatever order its holder uses. An exported
-`authority_info` series that Prometheus can alert on is tracked as a follow-up.
+**Authority changed:** `twilight_coreslot_authority_info` carries the two addresses as
+labels, so "a role moved" is something Prometheus can alert on. Record the `authority`
+and `emergency_authority` the network launched with, put them in the expression above in
+place of `<primary>` and `<emergency>`, and update the rule as the last step of every
+planned rotation. The alert then matches any series whose addresses are not the recorded
+ones. This is the check that catches a stolen authority key, whatever order its holder
+uses: the result of a rotation is always a different address, even when no height ever
+showed a nomination pending.
+
+The alert's own labels are the new addresses. For about one
+`prometheus-retention-time` after a rotation a node exports two series, the old pair and
+the new: the old one stops being refreshed and the sink expires it. The expression above
+does not wait for that, because it matches the new series as soon as it is scraped.
+
+The gauge is new after `v0.3.0-rc4`. On a node that does not export it, run the same
+comparison outside Prometheus: on a schedule, compare `twilightd coreslot-query params`
+(`authority`, `emergency_authority`) against the recorded addresses and page on any
+difference.
 
 **Liveness:** `absent(twilightd_build_info)` on a node whose metrics endpoint is up
 means it has not committed within the retention window. Every `twilight_*` gauge

@@ -30,6 +30,8 @@ func TestTelemetrySnapshotCountsTheValidatorSetState(t *testing.T) {
 		PendingKeyRotations:        1,
 		PrimaryNominationPending:   false,
 		EmergencyNominationPending: true,
+		Authority:                  authority,
+		EmergencyAuthority:         emergency,
 	}, snap)
 }
 

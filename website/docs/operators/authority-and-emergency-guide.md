@@ -79,8 +79,9 @@ accepts: it must show exactly the intended role and nominee.
 This view only sees a nomination that **waits**. A key holder can nominate and
 accept in the same block, and then no height ever shows it pending. To detect a
 rotation that has already happened, compare `coreslot-query params`
-(`authority`, `emergency_authority`) against the addresses you recorded, or watch
-for the `coreslot_authority_accepted` event.
+(`authority`, `emergency_authority`) against the addresses you recorded, alert on
+the `twilight_coreslot_authority_info` gauge (see [Monitoring](monitoring.md)), or
+watch for the `coreslot_authority_accepted` event.
 
 ## Recovery
 
