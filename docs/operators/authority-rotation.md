@@ -169,10 +169,10 @@ Any difference is a rotation that happened. Every completed handover also emits 
 indexer or event subscriber can catch the moment it happens.
 
 **The pending query, and its gauge, only see a nomination that waits.** Nodes export
-`twilight_coreslot_pending_authority_nomination{role}`, which is 1 while a nomination is pending,
-and this query shows **who** is nominated. That catches the honest two-step, a nomination carried
-in genesis, and an attacker who nominates and waits. It does **not** catch someone who holds the
-key and rotates in one go: a nomination and its acceptance can land in the **same block**, and
+`twilight_coreslot_pending_authority_nomination{authority_role}`, which is 1 while a nomination is
+pending, and this query shows **who** is nominated. That catches the honest two-step, a nomination
+carried in genesis, and an attacker who nominates and waits. It does **not** catch someone who holds
+the key and rotates in one go: a nomination and its acceptance can land in the **same block**, and
 then no committed height ever shows a pending entry and the gauge never leaves 0. Use the pending
 view to confirm your own handovers and to spot a waiting one; use the holder comparison above to
 detect a completed one.

@@ -44,6 +44,14 @@ import (
 // which is why the cleanup clears it.
 func enableTelemetry(t *testing.T) func() map[string]float64 {
 	t.Helper()
+	gather, _ := enableTelemetryWithRegistry(t)
+	return gather
+}
+
+// enableTelemetryWithRegistry is enableTelemetry for a test that needs the
+// registry itself, to read what gatherMetrics flattens away.
+func enableTelemetryWithRegistry(t *testing.T) (func() map[string]float64, *prometheus.Registry) {
+	t.Helper()
 	registry := prometheus.NewRegistry()
 	sink, err := metricsprom.NewPrometheusSinkFrom(metricsprom.PrometheusOpts{
 		Registerer: registry,
@@ -57,7 +65,7 @@ func enableTelemetry(t *testing.T) func() map[string]float64 {
 	require.NoError(t, err)
 	telemetry.EnableTelemetry()
 	t.Cleanup(disableTelemetry)
-	return func() map[string]float64 { return gatherMetrics(t, registry) }
+	return func() map[string]float64 { return gatherMetrics(t, registry) }, registry
 }
 
 // disableTelemetry clears the SDK flag without touching any sink:
@@ -220,31 +228,31 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 
 	values := gather()
 	expected := map[string]float64{
-		"twilight_rewards_current_epoch":                                   2,
-		"twilight_rewards_current_epoch_start_height":                      float64(epochLength + 1),
-		"twilight_rewards_current_epoch_end_height":                        float64(2 * epochLength),
-		"twilight_rewards_epoch_blocks_remaining":                          float64(epochLength - 2),
-		"twilight_rewards_open_reward_enabled_blocks":                      2,
-		"twilight_rewards_last_finalized_epoch":                            1,
-		"twilight_rewards_cumulative_emitted_utwlt":                        gaugeOf(rewards.CumulativeEmitted),
-		"twilight_rewards_max_supply_utwlt":                                gaugeOf(maxSupply),
-		"twilight_rewards_halving_tier":                                    0,
-		"twilight_rewards_next_halving_threshold_utwlt":                    gaugeOf(maxSupply.QuoRaw(2)),
-		"twilight_rewards_escrow_balance_utwlt":                            gaugeOf(rewards.EscrowBalance),
-		"twilight_rewards_outstanding_entitlement_liability_utwlt":         gaugeOf(rewards.OutstandingLiability),
-		"twilight_rewards_carry_forward_remainder_utwlt":                   gaugeOf(rewards.CarryForwardRemainder),
-		"twilight_rewards_escrow_solvency_delta_utwlt":                     0,
-		"twilight_rewards_paused":                                          0,
-		"twilight_rewards_pause_transition_pending":                        0,
-		"twilight_rewards_release_enabled":                                 1,
-		"twilight_mining_settlement_clock":                                 float64(epochLength + 2),
-		"twilight_mining_last_processed_reward_epoch":                      1,
-		"twilight_coreslot_active_slots":                                   1,
-		"twilight_coreslot_min_active_slots":                               float64(csParams.MinActiveSlots),
-		"twilight_coreslot_max_active_slots":                               float64(csParams.MaxActiveSlots),
-		"twilight_coreslot_pending_key_rotations":                          0,
-		`twilight_coreslot_pending_authority_nomination{role="emergency"}`: 0,
-		`twilight_coreslot_pending_authority_nomination{role="primary"}`:   0,
+		"twilight_rewards_current_epoch":                                                                        2,
+		"twilight_rewards_current_epoch_start_height":                                                           float64(epochLength + 1),
+		"twilight_rewards_current_epoch_end_height":                                                             float64(2 * epochLength),
+		"twilight_rewards_epoch_blocks_remaining":                                                               float64(epochLength - 2),
+		"twilight_rewards_open_reward_enabled_blocks":                                                           2,
+		"twilight_rewards_last_finalized_epoch":                                                                 1,
+		"twilight_rewards_cumulative_emitted_utwlt":                                                             gaugeOf(rewards.CumulativeEmitted),
+		"twilight_rewards_max_supply_utwlt":                                                                     gaugeOf(maxSupply),
+		"twilight_rewards_halving_tier":                                                                         0,
+		"twilight_rewards_next_halving_threshold_utwlt":                                                         gaugeOf(maxSupply.QuoRaw(2)),
+		"twilight_rewards_escrow_balance_utwlt":                                                                 gaugeOf(rewards.EscrowBalance),
+		"twilight_rewards_outstanding_entitlement_liability_utwlt":                                              gaugeOf(rewards.OutstandingLiability),
+		"twilight_rewards_carry_forward_remainder_utwlt":                                                        gaugeOf(rewards.CarryForwardRemainder),
+		"twilight_rewards_escrow_solvency_delta_utwlt":                                                          0,
+		"twilight_rewards_paused":                                                                               0,
+		"twilight_rewards_pause_transition_pending":                                                             0,
+		"twilight_rewards_release_enabled":                                                                      1,
+		"twilight_mining_settlement_clock":                                                                      float64(epochLength + 2),
+		"twilight_mining_last_processed_reward_epoch":                                                           1,
+		"twilight_coreslot_active_slots":                                                                        1,
+		"twilight_coreslot_min_active_slots":                                                                    float64(csParams.MinActiveSlots),
+		"twilight_coreslot_max_active_slots":                                                                    float64(csParams.MaxActiveSlots),
+		"twilight_coreslot_pending_key_rotations":                                                               0,
+		`twilight_coreslot_pending_authority_nomination{authority_role="emergency"}`:                            0,
+		`twilight_coreslot_pending_authority_nomination{authority_role="primary"}`:                              0,
 		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`: 1,
 	}
 	for name, want := range expected {
@@ -264,6 +272,54 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		}
 		_, documented := expected[name]
 		require.True(t, documented, "metric %s is exported but not documented", name)
+	}
+}
+
+// targetLabels are label names a scrape configuration commonly stamps on every
+// target. Prometheus resolves a clash in the target's favor (honor_labels is
+// false by default) and renames the metric's own label to exported_<name>, so a
+// metric that uses one of these has a different label name depending on who
+// scrapes it: rules and dashboards written against one deployment silently
+// match nothing on another. The nomination gauge shipped with "role" and
+// arrived as "exported_role" on the first network that scraped it (#201).
+var targetLabels = map[string]struct{}{
+	"job": {}, "instance": {}, "role": {}, "host": {}, "env": {}, "dc": {}, "region": {},
+}
+
+// No label this app puts on a series may be one a scrape configuration is likely
+// to own. The read-failure counter is exported only on a failed snapshot, so it
+// is incremented here by hand: a healthy chain would leave its label unchecked.
+func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
+	_, registry := enableTelemetryWithRegistry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, 2)
+	chain.app.CountTelemetryReadFailureForTest("rewards")
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	seen := map[string]struct{}{}
+	for _, family := range families {
+		if !strings.HasPrefix(family.GetName(), "twilight") {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				name := label.GetName()
+				seen[name] = struct{}{}
+				_, clash := targetLabels[name]
+				require.False(t, clash,
+					"%s carries the label %q, which scrape configurations stamp on targets; Prometheus would rename it to exported_%s",
+					family.GetName(), name, name)
+				require.False(t, strings.HasPrefix(name, "exported_"),
+					"%s carries the label %q: the exported_ prefix is what Prometheus renames a clashing label to", family.GetName(), name)
+			}
+		}
+	}
+	// The labels this app is known to export. A test that saw none of them
+	// would pass by looking at nothing.
+	for _, name := range []string{"authority_role", "module", "version", "commit", "go_version"} {
+		_, found := seen[name]
+		require.True(t, found, "no exported series carries the label %q, so this test did not look at it", name)
 	}
 }
 

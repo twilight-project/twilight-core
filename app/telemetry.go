@@ -77,6 +77,9 @@ const (
 	// treats an empty label value as an absent label, and a node whose version
 	// label is missing is indistinguishable from one whose build_info is absent.
 	unstampedBuild = "unstamped"
+	// authorityRoleLabel names which authority (primary, emergency) a gauge is
+	// about. See setRoleGauge for why it is not simply "role".
+	authorityRoleLabel = "authority_role"
 )
 
 // Commit persists the block through BaseApp and then, with the store committed,
@@ -244,11 +247,16 @@ func setGauge(module, name string, value float32) {
 	telemetry.SetGauge(value, telemetryNamespace, module, name)
 }
 
+// setRoleGauge exports a per-authority-role gauge. The label is authority_role
+// and not role: scrape configurations commonly stamp every target with a role
+// label of their own (validator, fullnode), and Prometheus then keeps the
+// target's label and renames the metric's to exported_role, so the same series
+// has a different label name from one deployment to the next (#201).
 func setRoleGauge(module, name, role string, pending bool) {
 	telemetry.SetGaugeWithLabels(
 		[]string{telemetryNamespace, module, name},
 		boolGauge(pending),
-		[]metrics.Label{telemetry.NewLabel("role", role)},
+		[]metrics.Label{telemetry.NewLabel(authorityRoleLabel, role)},
 	)
 }
 

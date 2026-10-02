@@ -183,7 +183,7 @@ counter is a consensus-state change and is tracked separately.
 | `twilight_coreslot_min_active_slots` | | Parameter | constant between parameter updates |
 | `twilight_coreslot_max_active_slots` | | Parameter | constant between parameter updates |
 | `twilight_coreslot_pending_key_rotations` | | Consensus-key rotations queued and not yet effective | 0 except during a rotation |
-| `twilight_coreslot_pending_authority_nomination` | `role` = `primary` \| `emergency` | An authority handover is nominated and not yet accepted or canceled | 0 except during a handover |
+| `twilight_coreslot_pending_authority_nomination` | `authority_role` = `primary` \| `emergency` | An authority handover is nominated and not yet accepted or canceled | 0 except during a handover |
 
 `twilight_coreslot_pending_authority_nomination` is the alertable signal for an
 authority handover: it is 1 from the block a nomination is committed until it is
@@ -211,6 +211,24 @@ early warning, never as the control. The control is an alert on **the authority
 addresses themselves differing from the recorded, known-good values** (see "Authority
 changed" below).
 
+**The label was `role` in `v0.3.0-rc4`.** Later builds name it `authority_role`. `role` is
+a label many scrape configurations stamp on every target (`validator`, `fullnode`).
+Prometheus resolves that clash in the target's favor and renames the metric's own label to
+`exported_role`, so the same series had a different label name from one deployment to the
+next. While a network runs both builds, both names are live, and an alert that has to hold
+across the upgrade normalizes them first:
+
+```promql
+max by (authority_role) (
+  label_replace(
+    label_replace(twilight_coreslot_pending_authority_nomination,
+      "authority_role", "$1", "exported_role", "(.+)"),
+    "authority_role", "$1", "role", "(primary|emergency)")
+) == 1
+```
+
+Once every node is upgraded, the plain expression under "Alerts worth having" is enough.
+
 ### Exporter health
 
 | Metric | Labels | Meaning |
@@ -230,7 +248,7 @@ testnet's 360-block epochs; scale to your epoch length.
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |
-| Authority nomination pending | `max by (role) (twilight_coreslot_pending_authority_nomination) == 1` | A handover is waiting to be accepted. Expected only during a planned rotation; otherwise an incident (there is no timelock: the nominee can accept in the next block). Page, then run `pending-authority-transfers` to see who is nominated. Blind to a same-block nominate + accept (see above) |
+| Authority nomination pending | `max by (authority_role) (twilight_coreslot_pending_authority_nomination) == 1` | A handover is waiting to be accepted. Expected only during a planned rotation; otherwise an incident (there is no timelock: the nominee can accept in the next block). Page, then run `pending-authority-transfers` to see who is nominated. Blind to a same-block nominate + accept (see above) |
 | Version skew | `count(count by (version) (twilightd_build_info)) > 1` | A rollout is incomplete, or a node was not upgraded |
 | Exporter fault | `max_over_time(twilight_telemetry_read_failures_total[1h]) > 0` | A snapshot read failed on that node (not `increase()`: the sink expires and restarts the counter, see above) |
 
