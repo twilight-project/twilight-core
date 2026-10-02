@@ -18,3 +18,8 @@ func (a *App) EmitTelemetryForTest() { a.emitTelemetry() }
 // test can write through it deliberately and prove the write is discarded.
 // Exported only to the test build.
 func (a *App) TelemetryContextForTest() sdk.Context { return a.telemetryContext() }
+
+// CountTelemetryReadFailureForTest increments the read-failure counter as a
+// failed snapshot would, so a test can see a series that a healthy chain never
+// exports. Exported only to the test build.
+func (a *App) CountTelemetryReadFailureForTest(module string) { a.countTelemetryReadFailure(module) }
