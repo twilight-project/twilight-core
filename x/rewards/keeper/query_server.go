@@ -100,7 +100,7 @@ func NewQueryServer(k Keeper) types.QueryServer { return queryServer{Keeper: k} 
 func (q queryServer) Params(ctx context.Context, _ *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
 	params, err := q.GetParams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("params", err)
 	}
 	return &types.QueryParamsResponse{Params: &params}, nil
 }
@@ -158,7 +158,7 @@ func (q queryServer) EpochInfo(ctx context.Context, _ *types.QueryEpochInfoReque
 func (q queryServer) NextHalving(ctx context.Context, _ *types.QueryNextHalvingRequest) (*types.QueryNextHalvingResponse, error) {
 	info, err := q.nextHalvingInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("halving schedule inputs", err)
 	}
 	return &types.QueryNextHalvingResponse{Info: info}, nil
 }
@@ -169,7 +169,10 @@ func (q queryServer) EpochReward(ctx context.Context, req *types.QueryEpochRewar
 	}
 	epoch, found, err := q.GetFinalizedEpoch(ctx, req.EpochNumber)
 	if err != nil {
-		return nil, err
+		// Found-and-unreadable, as opposed to the not-found arm below: the record
+		// is there and will not decode, which is the one answer a read surface
+		// must never flatten into "no such epoch".
+		return nil, canonicalStateQueryError(fmt.Sprintf("finalized epoch %d", req.EpochNumber), err)
 	}
 	if !found {
 		return nil, status.Errorf(codes.NotFound, "finalized epoch %d not found", req.EpochNumber)
@@ -180,11 +183,11 @@ func (q queryServer) EpochReward(ctx context.Context, req *types.QueryEpochRewar
 func (q queryServer) CumulativeEmitted(ctx context.Context, _ *types.QueryCumulativeEmittedRequest) (*types.QueryCumulativeEmittedResponse, error) {
 	state, err := q.GetState(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("rewards state", err)
 	}
 	params, err := q.GetParams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("params", err)
 	}
 	return &types.QueryCumulativeEmittedResponse{CumulativeEmitted: state.CumulativeEmitted, MaxSupply: params.MaxSupply}, nil
 }
@@ -192,11 +195,11 @@ func (q queryServer) CumulativeEmitted(ctx context.Context, _ *types.QueryCumula
 func (q queryServer) SupplySchedule(ctx context.Context, _ *types.QuerySupplyScheduleRequest) (*types.QuerySupplyScheduleResponse, error) {
 	params, err := q.GetParams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("params", err)
 	}
 	info, err := q.nextHalvingInfo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("halving schedule inputs", err)
 	}
 	return &types.QuerySupplyScheduleResponse{Params: &params, NextHalving: info}, nil
 }
@@ -204,7 +207,7 @@ func (q queryServer) SupplySchedule(ctx context.Context, _ *types.QuerySupplySch
 func (q queryServer) CurrentEpochActiveBlocks(ctx context.Context, req *types.QueryCurrentEpochActiveBlocksRequest) (*types.QueryCurrentEpochActiveBlocksResponse, error) {
 	state, err := q.GetState(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("rewards state", err)
 	}
 	var pageReq *query.PageRequest
 	if req != nil {
@@ -220,7 +223,9 @@ func (q queryServer) CurrentEpochActiveBlocks(ctx context.Context, req *types.Qu
 		query.WithCollectionPaginationPairPrefix[uint64, uint64](state.CurrentEpoch),
 	)
 	if err != nil {
-		return nil, err
+		// A malformed page request already carries InvalidArgument and passes
+		// through; a counter that will not decode does not, and is Internal.
+		return nil, canonicalStateQueryError("open-epoch active block counts", err)
 	}
 	return &types.QueryCurrentEpochActiveBlocksResponse{EpochNumber: state.CurrentEpoch, ActiveBlocks: blocks, Pagination: pageRes}, nil
 }
@@ -340,7 +345,10 @@ func (q queryServer) nextHalvingInfo(ctx context.Context) (*types.NextHalvingInf
 // never configured when in fact the database holding it is broken.
 //
 // Anything already carrying a transport code — a canceled or timed-out query —
-// is passed through untouched rather than relabelled.
+// is passed through untouched rather than relabelled. An error carrying none,
+// or carrying Unknown, which is what a registered module error answers when no
+// code was chosen for it, is state this module could not read: it reaches the
+// caller as Internal, never as the raw error (#199).
 func epochQueryError(err error) error {
 	switch {
 	case err == nil:
@@ -356,7 +364,7 @@ func epochQueryError(err error) error {
 	case errors.Is(err, types.ErrInvalidState):
 		return status.Error(codes.Internal, err.Error())
 	default:
-		return err
+		return canonicalStateQueryError("epoch history", err)
 	}
 }
 
