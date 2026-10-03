@@ -32,14 +32,35 @@ TARGETS="${RELEASE_TARGETS:-linux/amd64 linux/arm64 darwin/arm64}"
 
 refuse() { echo "refusing to build a release: $1" >&2; shift; [[ $# -gt 0 ]] && printf '%s\n' "$@" >&2; exit 1; }
 
-# The release directory is replaced wholesale at the end, so it must name a
-# directory inside the repository and not the repository itself.
-case "$RELEASE_DIR" in
-  "" | . | ./ | /* | *..*) refuse "RELEASE_DIR must be a relative path below the repository: '$RELEASE_DIR'" ;;
-esac
-
 command -v git >/dev/null 2>&1 || refuse "git is required to establish provenance"
 git rev-parse HEAD >/dev/null 2>&1 || refuse "not a git repository, so the commit cannot be established"
+
+# The release directory is replaced wholesale at the end, so it may only name a
+# place whose loss costs nothing: a normalised path under build/, which git
+# ignores. A looser rule ("relative, below the repository") accepted `.git`,
+# `docs`, `x` and `app`, and replaced the named directory with release files; it
+# also let `.//` and `./.` through to fail at the swap, after a full build, and
+# refused a legitimate name such as build/v1..2 for containing two dots.
+#
+# Each component is checked, not the string: `..` as a component climbs out,
+# while `v1..2` is only a name. The ignore check is the backstop for the rule
+# itself: if build/ ever stopped being ignored, a release directory there would
+# be tracked content again.
+release_dir_ok() {
+  local dir="$1" part parts
+  [[ "$dir" == build/* && "$dir" != */ ]] || return 1
+  # read -a, not an unquoted expansion: a component such as `*` must stay a
+  # name here and not expand to whatever is in the working directory.
+  IFS=/ read -r -a parts <<<"$dir"
+  for part in "${parts[@]}"; do
+    [[ -n "$part" && "$part" != . && "$part" != .. ]] || return 1
+  done
+  return 0
+}
+release_dir_ok "$RELEASE_DIR" \
+  || refuse "RELEASE_DIR must be a normalised path under build/ (no empty, '.' or '..' components): '$RELEASE_DIR'"
+git check-ignore -q -- "$RELEASE_DIR" \
+  || refuse "RELEASE_DIR is not ignored by git, so replacing it could destroy tracked content: '$RELEASE_DIR'"
 
 # --- guards, evaluated here rather than as Make variables so no caller can blank
 # --- them from the command line.
@@ -97,10 +118,88 @@ BUILD_TAGS="${BUILD_TAGS:-}"
 # Source comes from the commit, not the working directory.
 SRC="$(mktemp -d)"
 META="$(mktemp -d)"
-STAGE=""; OLD=""
-cleanup() { rm -rf "$SRC" "$META"; [[ -n "$STAGE" ]] && rm -rf "$STAGE"; [[ -n "$OLD" ]] && rm -rf "$OLD"; return 0; }
+OUT="$ROOT/$RELEASE_DIR"
+STAGE=""; OLD=""; SWAPPED=0; CHILD=""
+
+# cleanup never deletes the only copy of the previous release.
+#
+# The swap at the end is two renames: the previous release is set aside into
+# $OLD, then the staged one is moved into place. A run that ends between them,
+# on a signal say, has a previous release in $OLD and nothing at $OUT. It is put
+# back. $OLD is removed only once the swap is known complete; if the run ended
+# after the second rename but before that was recorded, both are left where they
+# are, because a leftover directory costs disk space and a wrong guess costs a
+# release.
+cleanup() {
+  rm -rf "$SRC" "$META"
+  if [[ -n "$OLD" && -e "$OLD/release" ]]; then
+    if (( SWAPPED )); then
+      rm -rf "$OLD"
+    elif [[ ! -e "$OUT" ]] && mv "$OLD/release" "$OUT" 2>/dev/null; then
+      rm -rf "$OLD"
+    else
+      echo "the previous release is kept at $OLD/release" >&2
+    fi
+  elif [[ -n "$OLD" ]]; then
+    rm -rf "$OLD"
+  fi
+  [[ -n "$STAGE" ]] && rm -rf "$STAGE"
+  return 0
+}
 trap cleanup EXIT
+
+# A signal ends the build as well as the script. Without this, a TERM delivered
+# to the script alone left `go build` running: it finished after cleanup had
+# removed the staging directory, recreated it (`go build -o` creates parents),
+# and left an officially named binary there. The step in flight runs in its own
+# process group (see in_group) so that the whole of it can be ended first.
+on_signal() { # <exit code>
+  trap - INT TERM HUP
+  if [[ -n "$CHILD" ]]; then
+    kill -TERM -- "-$CHILD" 2>/dev/null || kill -TERM "$CHILD" 2>/dev/null || true
+    wait "$CHILD" 2>/dev/null || true
+    CHILD=""
+  fi
+  exit "$1"
+}
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
+
+# in_group runs a step as a background job with job control on, which gives it a
+# process group of its own, and waits for it. The group is what on_signal ends:
+# the toolchain runs compilers and a linker as children, and ending only the
+# direct child would leave those writing into the staging directory.
+in_group() {
+  local rc
+  set -m
+  ( "$@" ) &
+  CHILD=$!
+  set +m
+  wait "$CHILD"; rc=$?
+  CHILD=""
+  return "$rc"
+}
+
+# Staging directories older than an hour are from a run that was killed outright
+# (SIGKILL runs no cleanup). They are never the only copy of anything: a staged
+# release that reached the swap is no longer under this name. Directories holding
+# a set-aside previous release (.release-old.*) are deliberately not touched.
+find "$(dirname "$OUT")" -maxdepth 1 -type d -name '.release-staging.*' -mmin +60 \
+  -exec rm -rf {} + 2>/dev/null || true
+
 git archive HEAD | tar -x -C "$SRC" || refuse "could not export HEAD"
+
+# The toolchain is pinned to the commit's own go directive. Under the default
+# GOTOOLCHAIN=auto the build uses the newer of the host's go and go.mod's, so
+# two maintainers with different local Go versions produced different binaries
+# for the same tag. It is read from the exported go.mod, like everything else a
+# release is built from, and third-party-notices.sh inherits it. (A `toolchain`
+# line in go.mod would not pin anything under auto, and `go mod tidy` removes it
+# when it equals the go directive.)
+GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "$SRC/go.mod")"
+[[ -n "$GO_VERSION" ]] || refuse "could not read the go directive from the committed go.mod"
+export GOTOOLCHAIN="go$GO_VERSION"
 
 # The binaries statically link third-party modules whose licenses must travel with
 # them (Apache-2.0 §4(d) also requires CometBFT's NOTICE), so every release carries
@@ -118,8 +217,8 @@ cp "$SRC/go.mod" "$META/go.mod.committed" && cp "$SRC/go.sum" "$META/go.sum.comm
 module_files_unchanged() {
   cmp -s "$SRC/go.mod" "$META/go.mod.committed" && cmp -s "$SRC/go.sum" "$META/go.sum.committed"
 }
-( cd "$SRC" && RELEASE_TARGETS="$TARGETS" bash ./scripts/third-party-notices.sh "$META/THIRD_PARTY_NOTICES" ) \
-  || refuse "could not produce the third-party notices"
+notices() { cd "$SRC" && RELEASE_TARGETS="$TARGETS" bash ./scripts/third-party-notices.sh "$META/THIRD_PARTY_NOTICES"; }
+in_group notices || refuse "could not produce the third-party notices"
 module_files_unchanged || refuse "go.mod or go.sum changed while producing the third-party notices"
 
 LDFLAGS="-X github.com/cosmos/cosmos-sdk/version.Version=$VERSION \
@@ -133,7 +232,6 @@ LDFLAGS="-X github.com/cosmos/cosmos-sdk/version.Version=$VERSION \
 # exactly as it was, instead of a wiped directory holding officially named
 # binaries and no SHA256SUMS. Staging on the same filesystem makes the swap two
 # renames rather than a copy.
-OUT="$ROOT/$RELEASE_DIR"
 PARENT="$(dirname "$OUT")"
 mkdir -p "$PARENT" || refuse "could not create $(dirname "$RELEASE_DIR")"
 STAGE="$(mktemp -d "$PARENT/.release-staging.XXXXXX")" || refuse "could not create a staging directory"
@@ -144,9 +242,11 @@ for t in $TARGETS; do
   os="${t%%/*}"; arch="${t##*/}"
   name="twilightd-$VERSION-$os-$arch"
   echo "  building $RELEASE_DIR/$name  (from $COMMIT)"
-  ( cd "$SRC" && GOOS="$os" GOARCH="$arch" \
-      go build -trimpath -ldflags "$LDFLAGS" -o "$STAGE/$name" ./cmd/twilightd ) \
-    || refuse "build failed for $t"
+  build_target() {
+    cd "$SRC" && GOOS="$os" GOARCH="$arch" \
+      go build -trimpath -ldflags "$LDFLAGS" -o "$STAGE/$name" ./cmd/twilightd
+  }
+  in_group build_target || refuse "build failed for $t"
 done
 module_files_unchanged || refuse "go.mod or go.sum changed during the build"
 
@@ -177,6 +277,7 @@ if ! mv "$STAGE" "$OUT"; then
   fi
   refuse "could not move the staged release into $RELEASE_DIR"
 fi
+SWAPPED=1
 STAGE=""
 
 echo
