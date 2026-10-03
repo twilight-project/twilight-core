@@ -54,3 +54,7 @@ response as the next `--page-key`. Other commands take no pagination flags.
 - Missing/zero required id → `InvalidArgument`.
 - Invalid range (`start > end`) → `InvalidArgument`.
 - Non-finalized `epoch-reward` → `NotFound`.
+- Stored state that exists but cannot be read (a record that will not decode, an
+  index that names a missing record) → `Internal`, on every query. It is never
+  `NotFound` and never `Unknown`: a client that sees `Internal` is looking at a
+  damaged node, not at an absent object.

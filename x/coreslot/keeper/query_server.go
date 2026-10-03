@@ -123,12 +123,18 @@ func mandatoryStateError(subject string, err error) error {
 // carriesTransportCode reports whether an error already names its own gRPC code,
 // either because a mapper here classified it or because the transport produced
 // it. Such an error is passed through untouched rather than reclassified.
+//
+// A code of Unknown does not count. Every registered module error implements
+// GRPCStatus, and unless registered with a code of its own it answers Unknown:
+// that is the SDK saying "no code was chosen", not a classification. Passing it
+// through is how a keeper's fail-closed sentinel (ErrInvalidGenesis,
+// ErrInvalidTransition) reached clients as Unknown instead of Internal (#199).
 func carriesTransportCode(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var withStatus interface{ GRPCStatus() *grpcstatus.Status }
-	return errors.As(err, &withStatus)
+	return errors.As(err, &withStatus) && withStatus.GRPCStatus().Code() != codes.Unknown
 }
 
 type queryServer struct{ Keeper }
@@ -163,6 +169,12 @@ func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsReq
 	if req != nil {
 		pageReq = req.Pagination
 		status = req.Status
+	}
+	// The one page request the SDK paginator refuses with a plain error, an
+	// offset and a key together, is the caller's mistake; left to the paginator
+	// it would arrive as a read failure and be classified Internal.
+	if pageReq != nil && pageReq.Offset != 0 && len(pageReq.Key) != 0 {
+		return nil, grpcStatusError{code: codes.InvalidArgument, err: fmt.Errorf("a page request may set an offset or a key, not both")}
 	}
 
 	slots, pageRes, err := query.CollectionFilteredPaginate(
@@ -228,12 +240,37 @@ func slotIndexError(index, key string, err error) error {
 	}
 }
 
+// indexedSlot follows a secondary-index hit to the slot it names.
+//
+// This is not the keyed lookup CoreSlot performs. There, an absent slot is the
+// ordinary answer to "slot 99?". Here the index has already said the slot
+// exists, so a slot that is then missing, or will not decode, is a contradiction
+// between two parts of the store, and it stays Internal: answering NotFound
+// would tell the caller the operator or validator was never registered on the
+// strength of a record that says it was (#199).
+func (q queryServer) indexedSlot(ctx context.Context, index, key string, id uint64) (*types.QueryCoreSlotResponse, error) {
+	slot, err := q.Slots.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			return nil, grpcStatusError{
+				code: codes.Internal,
+				err:  fmt.Errorf("coreslot %s index entry for %s names slot %d, which does not exist", index, key, id),
+			}
+		}
+		return nil, grpcStatusError{
+			code: codes.Internal,
+			err:  fmt.Errorf("coreslot slot %d, named by the %s index entry for %s, could not be read: %w", id, index, key, err),
+		}
+	}
+	return &types.QueryCoreSlotResponse{Slot: &slot}, nil
+}
+
 func (q queryServer) CoreSlotByOperator(ctx context.Context, req *types.QueryCoreSlotByOperatorRequest) (*types.QueryCoreSlotResponse, error) {
 	id, err := q.ByOperator.Get(ctx, req.OperatorAddress)
 	if err != nil {
 		return nil, slotIndexError("operator", req.OperatorAddress, err)
 	}
-	return q.CoreSlot(ctx, &types.QueryCoreSlotRequest{SlotId: id})
+	return q.indexedSlot(ctx, "operator", req.OperatorAddress, id)
 }
 
 func (q queryServer) CoreSlotByConsensusAddress(ctx context.Context, req *types.QueryCoreSlotByConsensusAddressRequest) (*types.QueryCoreSlotResponse, error) {
@@ -252,7 +289,7 @@ func (q queryServer) CoreSlotByConsensusAddress(ctx context.Context, req *types.
 	if err != nil {
 		return nil, slotIndexError("consensus address", key, err)
 	}
-	return q.CoreSlot(ctx, &types.QueryCoreSlotRequest{SlotId: id})
+	return q.indexedSlot(ctx, "consensus address", key, id)
 }
 
 func (q queryServer) PendingKeyRotations(ctx context.Context, _ *types.QueryPendingKeyRotationsRequest) (*types.QueryPendingKeyRotationsResponse, error) {
@@ -298,9 +335,9 @@ func (q queryServer) PendingAuthorityTransfers(ctx context.Context, _ *types.Que
 	err := q.PendingAuthority.Walk(ctx, nil, func(key int32, transfer types.PendingAuthorityTransfer) (bool, error) {
 		role := types.AuthorityRole(key)
 		if _, err := authorityRoleKey(role); err != nil {
-			// A plain error, deliberately not the wrapped module sentinel: a
-			// registered SDK error carries its own GRPCStatus (Unknown), which
-			// mandatoryStateError would pass through instead of classifying.
+			// A plain error rather than the module sentinel: the sentinel's own
+			// code is Unknown, which mandatoryStateError now classifies as
+			// Internal too, but this is not a transition the sentinel describes.
 			return true, fmt.Errorf("a nomination is stored under key %d, which is not an authority role", key)
 		}
 		if _, err := sdk.AccAddressFromBech32(transfer.Nominee); err != nil {

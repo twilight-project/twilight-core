@@ -10,7 +10,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 
+	storetypes "cosmossdk.io/store/types"
+
 	grpctypes "github.com/cosmos/cosmos-sdk/types/grpc"
+	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/app"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
@@ -97,6 +100,15 @@ func malformedCases() []classificationCase {
 			&miningtypes.QueryOpenSettlementsRequest{SlotId: 0}, codes.InvalidArgument},
 		{"rewards epoch zero", "/twilight.rewards.v1.Query/EpochBoundaries",
 			&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 0}, codes.InvalidArgument},
+		// An offset and a key together is the one page request the SDK paginator
+		// refuses with a plain error; it is the caller's mistake, not a damaged
+		// node, and must not arrive as Internal.
+		{"coreslot slots paged by offset and key at once", "/twilight.coreslot.v1.Query/CoreSlots",
+			&coreslottypes.QueryCoreSlotsRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
+		{"rewards active blocks paged by offset and key at once", "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
+			&rewardstypes.QueryCurrentEpochActiveBlocksRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
+		{"rewards epoch config versions paged by offset and key at once", "/twilight.rewards.v1.Query/EpochConfigVersions",
+			&rewardstypes.QueryEpochConfigVersionsRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
 	}
 }
 
@@ -236,6 +248,176 @@ func TestQueriesClassifyMalformedRequestsAsInvalidArgument(t *testing.T) {
 			require.Equal(t, testCase.want, classify(t, querier, testCase))
 		})
 	}
+}
+
+// corruptionCase is one query asked about state that exists and cannot be
+// trusted: an index entry naming a record that is not there, or a stored value
+// that will not decode. damage writes the fault through an uncommitted context
+// over the chain's head.
+type corruptionCase struct {
+	name   string
+	method string
+	req    protoMessage
+	// arrange, if set, brings the undamaged chain to the state the case needs
+	// (a finalized epoch to damage, say) before anything is checked.
+	arrange func(t *testing.T, chain *pinnedChain)
+	// healthy, if set, is the request that proves the handler answers on the
+	// undamaged chain when req itself names something that does not exist yet
+	// (a stray index key that damage is about to create).
+	healthy func(chain *pinnedChain) protoMessage
+	damage  func(t *testing.T, chain *pinnedChain)
+}
+
+func corruptionCases() []corruptionCase {
+	const strayConsensus = "ffeeddccbbaa99887766554433221100ffeeddcc"
+	corruptFirst := func(storeKey string, prefix []byte) func(*testing.T, *pinnedChain) {
+		return func(t *testing.T, chain *pinnedChain) { corruptFirstStoredValue(t, chain, storeKey, prefix) }
+	}
+	return []corruptionCase{
+		// --- x/coreslot: an index that names a slot the store does not hold ----
+		{name: "coreslot active index names a missing slot", method: "/twilight.coreslot.v1.Query/ActiveCoreSlots",
+			req: &coreslottypes.QueryActiveCoreSlotsRequest{},
+			damage: func(t *testing.T, chain *pinnedChain) {
+				require.NoError(t, chain.app.CoreSlotKeeper.ActiveSlots.Set(chain.headContext(), 999))
+			}},
+		{name: "coreslot operator index names a missing slot", method: "/twilight.coreslot.v1.Query/CoreSlotByOperator",
+			req: &coreslottypes.QueryCoreSlotByOperatorRequest{OperatorAddress: acc(0x7f)},
+			healthy: func(chain *pinnedChain) protoMessage {
+				return &coreslottypes.QueryCoreSlotByOperatorRequest{OperatorAddress: chain.operator}
+			},
+			damage: func(t *testing.T, chain *pinnedChain) {
+				require.NoError(t, chain.app.CoreSlotKeeper.ByOperator.Set(chain.headContext(), acc(0x7f), 999))
+			}},
+		{name: "coreslot consensus index names a missing slot", method: "/twilight.coreslot.v1.Query/CoreSlotByConsensusAddress",
+			req: &coreslottypes.QueryCoreSlotByConsensusAddressRequest{ConsensusAddress: strayConsensus},
+			healthy: func(chain *pinnedChain) protoMessage {
+				return &coreslottypes.QueryCoreSlotByConsensusAddressRequest{ConsensusAddress: chain.consensus}
+			},
+			damage: func(t *testing.T, chain *pinnedChain) {
+				require.NoError(t, chain.app.CoreSlotKeeper.ByConsensus.Set(chain.headContext(), strayConsensus, 999))
+			}},
+		// --- x/coreslot: a stored value that will not decode (already Internal;
+		// here so the table is the whole surface, not the part that was broken) --
+		{name: "coreslot params undecodable", method: "/twilight.coreslot.v1.Query/Params",
+			req: &coreslottypes.QueryParamsRequest{}, damage: corruptFirst(coreslottypes.StoreKey, coreslottypes.ParamsKey)},
+		// --- x/rewards: canonical state that will not decode ------------------
+		{name: "rewards params undecodable", method: "/twilight.rewards.v1.Query/Params",
+			req: &rewardstypes.QueryParamsRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
+		{name: "rewards state undecodable, cumulative emitted", method: "/twilight.rewards.v1.Query/CumulativeEmitted",
+			req: &rewardstypes.QueryCumulativeEmittedRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards params undecodable, cumulative emitted", method: "/twilight.rewards.v1.Query/CumulativeEmitted",
+			req: &rewardstypes.QueryCumulativeEmittedRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
+		{name: "rewards params undecodable, next halving", method: "/twilight.rewards.v1.Query/NextHalving",
+			req: &rewardstypes.QueryNextHalvingRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
+		{name: "rewards params undecodable, supply schedule", method: "/twilight.rewards.v1.Query/SupplySchedule",
+			req: &rewardstypes.QuerySupplyScheduleRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ParamsKey)},
+		{name: "rewards state undecodable, supply schedule", method: "/twilight.rewards.v1.Query/SupplySchedule",
+			req: &rewardstypes.QuerySupplyScheduleRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards state undecodable, current epoch active blocks", method: "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
+			req: &rewardstypes.QueryCurrentEpochActiveBlocksRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards active block counter undecodable", method: "/twilight.rewards.v1.Query/CurrentEpochActiveBlocks",
+			req: &rewardstypes.QueryCurrentEpochActiveBlocksRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.ActiveBlocksPrefix)},
+		{name: "rewards state undecodable, epoch info (control)", method: "/twilight.rewards.v1.Query/EpochInfo",
+			req: &rewardstypes.QueryEpochInfoRequest{}, damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.StateKey)},
+		{name: "rewards finalized epoch undecodable", method: "/twilight.rewards.v1.Query/EpochReward",
+			req: &rewardstypes.QueryEpochRewardRequest{EpochNumber: 1},
+			// Epoch 1 must have finalized, so there is a record to damage: the
+			// absence arm is pinned elsewhere and must not be what fires here.
+			arrange: func(t *testing.T, chain *pinnedChain) { chain.commitThrough(t, epochLength+1) },
+			damage:  corruptFirst(rewardstypes.StoreKey, rewardstypes.FinalizedEpochsPrefix)},
+		{name: "rewards epoch config history undecodable", method: "/twilight.rewards.v1.Query/EpochConfigVersions",
+			req:    &rewardstypes.QueryEpochConfigVersionsRequest{},
+			damage: corruptFirst(rewardstypes.StoreKey, rewardstypes.EpochConfigVersionsPrefix)},
+	}
+}
+
+// corruptFirstStoredValue replaces the stored value of the lowest-keyed entry
+// under a module store prefix with bytes that cannot decode, through an
+// uncommitted context over the chain's head.
+//
+// The key is read back out of the store rather than re-derived, so the test
+// cannot drift from the real key encoding and quietly damage nothing.
+func corruptFirstStoredValue(t *testing.T, chain *pinnedChain, storeKey string, prefix []byte) {
+	t.Helper()
+	store := chain.headContext().KVStore(chain.app.UnsafeFindStoreKey(storeKey))
+	iter := storetypes.KVStorePrefixIterator(store, prefix)
+	defer func() { require.NoError(t, iter.Close()) }()
+	require.Truef(t, iter.Valid(), "no entry under prefix %x in %s to damage", prefix, storeKey)
+	key := append([]byte{}, iter.Key()...)
+	require.NotEmpty(t, store.Get(key), "the legitimate value must exist before it is replaced")
+	// Three bytes: too short for a length-prefixed protobuf record and for a
+	// big-endian uint64, so it fails whichever codec reads it.
+	store.Set(key, []byte{0xff, 0xff, 0xff})
+}
+
+// commitDamaged commits what damage wrote as a store version of its own and
+// returns that version's height.
+//
+// A block cannot carry the damage: every one of these faults is on a path the
+// block itself reads, and the chain is fail-closed, so FinalizeBlock would refuse
+// rather than commit it. The multistore is committed directly instead, and the
+// query is then pinned to that height. It must be pinned: a query for "latest"
+// is checked against the block header the application keeps for its last
+// block, which no block has produced for this version, and is refused before it
+// reads anything.
+func commitDamaged(t *testing.T, chain *pinnedChain) int64 {
+	t.Helper()
+	return chain.app.CommitMultiStore().Commit().Version
+}
+
+// TestQueriesClassifyCorruptionAsInternal is the arm a read surface must get
+// right above all others: state that exists and cannot be trusted reaches the
+// caller as Internal — never as NotFound, which would say the data was never
+// written when the database holding it is broken, and never as Unknown, which a
+// client can only handle by matching message text. Every case first proves the
+// query answers normally on the undamaged chain, so the Internal that follows is
+// attributable to the damage and not to the case being unanswerable anyway.
+//
+// Before #199, two of these answered NotFound (a dangling index entry was
+// reported as absence) and eight answered Unknown (a keeper's error returned
+// raw, or a registered sentinel passed through with the SDK's default code).
+func TestQueriesClassifyCorruptionAsInternal(t *testing.T) {
+	for _, testCase := range corruptionCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			chain := bootPinnedChain(t)
+			chain.commitThrough(t, 2)
+			if testCase.arrange != nil {
+				testCase.arrange(t, chain)
+			}
+			querier := newHeaderQuerier(chain.app)
+			healthy := testCase.req
+			if testCase.healthy != nil {
+				healthy = testCase.healthy(chain)
+			}
+			requireAnswers(t, querier, testCase.method, healthy, 0)
+
+			testCase.damage(t, chain)
+			damaged := commitDamaged(t, chain)
+
+			data, err := testCase.req.Marshal()
+			require.NoError(t, err)
+			desc := querier.methods[testCase.method]
+			_, callErr := desc.Handler(querier.handlers[testCase.method], incomingHeight(damaged),
+				func(arg any) error { return arg.(protoMessage).Unmarshal(data) }, nil)
+			require.Errorf(t, callErr, "%s answered successfully against damaged state", testCase.name)
+			status, ok := grpcstatus.FromError(callErr)
+			require.Truef(t, ok, "%s returned an error carrying no gRPC status: %v", testCase.name, callErr)
+			require.Equalf(t, codes.Internal, status.Code(),
+				"%s: corruption must reach the caller as Internal, got %v: %v", testCase.name, status.Code(), callErr)
+		})
+	}
+}
+
+// requireAnswers asserts a query succeeds at height through the gRPC path.
+func requireAnswers(t *testing.T, querier *headerQuerier, method string, req protoMessage, height int64) {
+	t.Helper()
+	data, err := req.Marshal()
+	require.NoError(t, err)
+	desc, served := querier.methods[method]
+	require.Truef(t, served, "%s is not served over gRPC", method)
+	_, callErr := desc.Handler(querier.handlers[method], incomingHeight(height),
+		func(arg any) error { return arg.(protoMessage).Unmarshal(data) }, nil)
+	require.NoErrorf(t, callErr, "%s does not answer on an undamaged chain", method)
 }
 
 // TestNoQueryAnswersWithABodyAlongsideAnError pins the second half of the defect.
