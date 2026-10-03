@@ -58,6 +58,15 @@ unset GOARM GO386 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM
 
 die() { echo "third-party-notices: $*" >&2; exit 1; }
 
+# The toolchain is pinned to go.mod's go directive, as build-release.sh pins it:
+# a different Go links a different module set (the standard library moves
+# packages in and out of modules between releases), so the bundle would list
+# modules the released binaries do not carry, or miss ones they do. Derived here
+# as well as inherited, so a stand-alone run is pinned too.
+GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "$ROOT/go.mod")"
+[[ -n "$GO_VERSION" ]] || die "could not read the go directive from go.mod"
+export GOTOOLCHAIN="go$GO_VERSION"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
