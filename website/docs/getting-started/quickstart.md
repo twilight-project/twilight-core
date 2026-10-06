@@ -5,7 +5,7 @@ title: Quickstart
 # Quickstart
 
 This walks through running a localnet, finalizing a rewards epoch, and querying
-state. It uses the isolated short-epoch rewards localnet.
+state. It uses the isolated fast-block rewards localnet.
 
 ## 1. Build
 
@@ -19,11 +19,12 @@ make build
 make localnet-rewards-smoke
 ```
 
-This starts a four-node network with a short rewards epoch, drives it through
-epoch finalization, and asserts cross-node app-hash agreement. It prints a `PASS`
-summary with the minted emission, the per-slot reward, and the entitlements the
-epoch created. See [Localnet](../chain/localnet.md) for what it covers (and the
-funded-fixture caveat).
+This starts a four-node network with a 360-block rewards epoch at a fast block
+time, drives it through epoch finalization, and asserts cross-node app-hash
+agreement. It prints a `PASS` summary with the minted emission, the per-slot
+reward, and the entitlements the epoch created. See
+[Localnet](../chain/localnet.md) for what it covers (and the funded-fixture
+caveat).
 
 ## 3. Query rewards state
 
@@ -33,7 +34,7 @@ Against a running node (default first-node RPC `tcp://127.0.0.1:26657`):
 twilightd rewards-query params --node tcp://127.0.0.1:26657
 twilightd rewards-query epoch-info --node tcp://127.0.0.1:26657
 twilightd rewards-query epoch-reward 1 --node tcp://127.0.0.1:26657
-twilightd rewards-query slot-rewards 1 --limit 10 --node tcp://127.0.0.1:26657
+twilightd rewards-query epoch-entitlements 1 --limit 10 --node tcp://127.0.0.1:26657
 twilightd rewards-query module-balances --node tcp://127.0.0.1:26657
 twilightd rewards-query cumulative-emitted --node tcp://127.0.0.1:26657
 ```
@@ -54,4 +55,4 @@ make localnet-smoke
 ```
 
 This confirms node startup and agreement on the **production default** profile; it
-does **not** close a rewards epoch (the default epoch is 17,280 blocks).
+does **not** close a rewards epoch (the default epoch is 360 blocks).

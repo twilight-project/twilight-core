@@ -43,7 +43,7 @@ make localnet-rewards-epoch-smoke        # multi-node epoch finalization + entit
 | `TestRewardsAuthorityMsgRoutedThroughApp` | Msg service reachable; authority/emergency read through wired CoreSlot |
 | `TestRewardsEpochFinalizeSuspendAndRelease` | finalize → suspend → release against the real bank |
 | `TestDefinitivePOC1SettlementEndToEnd` | a full 360-block epoch through settlement and finalization, with exact economics |
-| `TestRewardsPopulatedAppExportImportAndContinue` | full app export/import round-trip |
+| `TestRewardsAppGenesisExportImportRoundTrip` | full app export/import round-trip |
 | `TestRewardsRuntimeFinalizeBlockFailClosed` | a lifecycle fault halts the block, no partial commit |
 
 ## Determinism expectations

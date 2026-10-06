@@ -38,7 +38,7 @@ JSON field names are the proto snake-case names used in genesis and
 | `fee_denom` | string | Mutable (queued) | Must equal `native_denom` (`utwlt`). |
 | `fee_distribution_mode` | enum | Mutable (queued) | Must be `FEE_DISTRIBUTION_MODE_NONE` in v1. |
 | `treasury_address` | string | Mutable (queued) | Required (valid Twilight address) only if a treasury share > 0. |
-| `emission_treasury_share_bps` | uint64 | Mutable (queued) | Basis points (≤ 10000) of emission sent to treasury. Default 0. |
+| `emission_treasury_share_bps` | uint64 | Mutable (queued) | Basis points (≤ 5000, the ratified ceiling) of emission sent to treasury. Default 0. |
 | `fee_treasury_share_bps` | uint64 | Mutable (queued) | Inert while fees are disabled. ≤ 10000. Default 0. |
 | `weighted_rewards_enabled` | bool | Mutable (queued) | Must be `false` in v1 (enabling is rejected). |
 

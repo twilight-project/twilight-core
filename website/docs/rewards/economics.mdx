@@ -26,8 +26,8 @@ Each epoch mints a **per-block** subsidy summed over the epoch's blocks, clipped
 by the supply cap. The minted amount depends on the number of blocks and the
 current subsidy tier — **not** on the number of active slots.
 
-> Example (localnet, `epoch_length_blocks = 10`):
-> minted emission = `10 × 416,190 = 4,161,900{constants.nativeDenom}`.
+> Example (localnet, `epoch_length_blocks = 360`):
+> minted emission = `360 × 416,190 = 149,828,400{constants.nativeDenom}`.
 
 Allocation then splits that minted pool among eligible slots by active-block participation — see
 [Allocation](#distribution-uniform-active-blocks). Do not multiply the subsidy
@@ -92,9 +92,9 @@ In v1 `distributableFees = 0` and the default `treasuryAmount = 0`, so
 `treasuryAmount` is computed from the epoch's minted emission, not from
 carry-forward.
 
-> Example: `pool = 4,161,900`, 4 slots each active for all 10 blocks
-> (total weight 40), each slot = `floor(4,161,900 × 10 / 40) = 1,040,475`,
-> sum = `4,161,900`, carry out = `0`.
+> Example: `pool = 149,828,400`, 4 slots each active for all 360 blocks
+> (total weight 1,440), each slot = `floor(149,828,400 × 360 / 1,440) = 37,457,100`,
+> sum = `149,828,400`, carry out = `0`.
 
 Properties:
 - floor-division dust carries forward (`remainder_policy = CARRY_FORWARD`);

@@ -12,9 +12,9 @@ to know about how their slot relates to rewards; the consensus model is in
 
 | Field | Used by | Notes |
 |---|---|---|
-| Operator address | rewards snapshot | Recorded into slot entitlements |
+| Operator address | rewards snapshot | Validated at finalization; not recorded into slot entitlements |
 | **Payout address** | rewards payout | Where an entitlement's remainder is released; snapshotted at finalization |
-| Reward weight | rewards metadata | Snapshotted for forward compatibility; separate from consensus power and not used for v1 reward allocation |
+| Reward weight | CoreSlot metadata | Held by CoreSlot for forward compatibility; never read by rewards, separate from consensus power, and not used for reward allocation |
 | Consensus power | consensus only | Validator voting power; never used for reward accounting |
 | Status | both | Only `ACTIVE` slots vote and earn active-block credit |
 
@@ -61,17 +61,17 @@ Suspending or removing a slot stops it from earning new active-block credit
   so rewards finalization can still snapshot a suspended/removed-but-credited slot.
 
 This is why earned rewards survive suspend or remove: finalization can still read
-the retained slot and reward metadata for any slot that already earned
-active-block credit, and the entitlement it writes is payable afterwards.
+the retained slot record for any slot that already earned active-block credit,
+and the entitlement it writes is payable afterwards.
 
 ## Reward snapshot dependencies (summary)
 
 For a slot that earned credit, finalization needs, and CoreSlot retains:
 
 1. the slot row (`GetSlot`);
-2. valid operator and payout address fields on it;
-3. the matching `OperatorRewardWeight` row (`GetRewardWeight`).
+2. valid operator and payout address fields on it.
 
-If any of these were ever deleted on suspend/remove, finalization would fail —
-they are not, which is why a suspended/removed slot's earned reward is still
-recorded as a payable entitlement.
+The reward-weight row is not read. If the slot row were ever deleted on
+suspend/remove, finalization would fail — it is not, which is why a
+suspended/removed slot's earned reward is still recorded as a payable
+entitlement.

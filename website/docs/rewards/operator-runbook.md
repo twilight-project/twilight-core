@@ -30,7 +30,7 @@ twilightd rewards-query next-halving --node <rpc>         # tier, subsidy, next 
 
 ```bash
 twilightd rewards-query epoch-reward <epoch> --node <rpc>
-# minted_emission, reward_pool, allocated_amount, carry_out, rewards[]
+# minted_emission, reward_pool, allocated_amount, carry_out (rewards[] is always empty)
 ```
 
 ## How a slot's rewards are released

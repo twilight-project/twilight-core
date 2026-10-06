@@ -56,9 +56,9 @@ sequenceDiagram
 
 Rewards depends on CoreSlot, never the reverse:
 
-- Rewards reads only `GetActiveSlots`, `GetSlot`, `GetRewardWeight`,
-  `GetAuthority`, and `GetEmergencyAuthority` from CoreSlot — a narrow,
-  read-only contract. It never writes CoreSlot state and never reads consensus
+- Rewards reads only `GetActiveSlots`, `GetSlot`, `GetAuthority`, and
+  `GetEmergencyAuthority` from CoreSlot — a narrow, read-only contract. It never
+  writes CoreSlot state, never reads reward weight, and never reads consensus
   power for accounting.
 - CoreSlot has no knowledge of rewards.
 

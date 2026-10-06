@@ -39,7 +39,9 @@ reference tables. Regenerate from a built binary with the per-command `--help`.
 | `--broadcast-mode` | Broadcast mode (`sync` or `async`) |
 | `-y, --yes` | Skip confirmation |
 
-## No REST gateway
+## REST gateway
 
-A REST / gRPC-gateway surface is **not** wired in the current version (consistent
-with CoreSlot). Use the gRPC/CLI queries above.
+A REST / gRPC-gateway surface is served on the API server (default port `1317`,
+enabled with `[api] enable = true` in `app.toml`) for the rewards, CoreSlot, and
+mining query services. When `api.swagger` is enabled, merged OpenAPI docs are
+served at `/swagger/` on the same port. gRPC (`9090`) remains canonical.
