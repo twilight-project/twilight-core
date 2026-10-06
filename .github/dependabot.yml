@@ -19,6 +19,12 @@ updates:
       - dependency-name: "github.com/cometbft/cometbft"
       - dependency-name: "cosmossdk.io/*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # grpc 1.84.x reintroduces GO-2026-6443 (reachable; govulncheck is blocking),
+      # so each bump to it fails CI and is closed (#203, #233). Ignore that line
+      # until a release clears the advisory, then remove this entry. Later minors
+      # are still proposed, and govulncheck remains the backstop for them.
+      - dependency-name: "google.golang.org/grpc"
+        versions: ["1.84.x"]
 
   - package-ecosystem: github-actions
     directory: /
