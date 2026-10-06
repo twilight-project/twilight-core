@@ -26,8 +26,9 @@ PROBE="cmd/twilightd/main.go"
 UNTRACKED_GO="cmd/twilightd/zz_provenance_probe.go"
 UNTRACKED_ASM="cmd/twilightd/zz_provenance_probe.s"
 GOWORK_PROBE="go.work"
+RELEASE_DIR_PROBE="zz_release_dir_probe.untracked"
 BIN="build/twilightd"
-cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM" go.work go.work.sum; }
+cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM" "$RELEASE_DIR_PROBE" go.work go.work.sum; }
 trap cleanup EXIT
 
 # Refuse to run against a tree that is already modified: the cases below dirty a
@@ -289,6 +290,132 @@ check "release builds under the probe"    "0" "$rc"
 check "artifacts identical to clean run"  "same" \
   "$([[ -n "$CLEAN_SUMS" && "$(cat build/release/SHA256SUMS 2>/dev/null)" == "$CLEAN_SUMS" ]] && echo same || echo different)"
 rm -rf build/release
+
+echo
+echo "=== RELEASE_DIR may only name a place under build/ ==="
+# The release directory is replaced wholesale. `.git`, `docs`, `x` and `app` used
+# to pass the check, and a run with one of them replaced that directory with
+# release files; `.//` and `./.` passed and failed only at the swap, after a full
+# build. Each must be refused before any work.
+#
+# These runs must not be able to reach the swap even if the rule under test is
+# broken, or a regression would have this suite replace the repository's own .git.
+# So an untracked probe file is present throughout: the untracked-file guard,
+# which runs AFTER the RELEASE_DIR rule and is proven above, refuses anything the
+# rule lets through. A run is counted only if it was refused BY the rule.
+: >"$RELEASE_DIR_PROBE"
+ERR="$(mktemp)"
+refused=0; total=0
+# The last one carries a newline: a component check that stops at a line end
+# never sees the `..` after it, and git normalises `..` when deciding what is
+# ignored, so it resolved to an ignored directory outside build/.
+for bad in .git docs x app . ./ .// ./. build build/ build/. build/./release build/../docs build//release /tmp/release ../release $'build/x\n/../../docs'; do
+  total=$((total + 1))
+  RELEASE_DIR="$bad" RELEASE_TARGETS=linux/amd64 VERSION=v9.9.9 ./scripts/build-release.sh >/dev/null 2>"$ERR"; rc=$?
+  if [[ $rc -ne 0 ]] && grep -q 'RELEASE_DIR' "$ERR"; then
+    refused=$((refused + 1))
+  else
+    echo "    not refused by the RELEASE_DIR rule: '$bad'" >&2
+  fi
+done
+check "every unsafe RELEASE_DIR is refused"   "$total" "$refused"
+# The old rule refused any name containing two dots. This one is only a name.
+RELEASE_DIR='build/v1..2' RELEASE_TARGETS=linux/amd64 VERSION=v9.9.9 ./scripts/build-release.sh >/dev/null 2>"$ERR"; rc=$?
+check "build/v1..2 passes the RELEASE_DIR rule" "stopped by the next guard" \
+  "$(if grep -q 'RELEASE_DIR' "$ERR"; then echo "refused by the rule"
+     elif [[ $rc -ne 0 ]] && grep -q 'untracked files present' "$ERR"; then echo "stopped by the next guard"
+     else echo "not stopped (exit $rc)"; fi)"
+check "the repository is intact"              "$HEAD_SHA" "$(git rev-parse HEAD 2>/dev/null)"
+check "no release directory was created"      "absent" \
+  "$([[ -e build/release || -e 'build/v1..2' ]] && echo present || echo absent)"
+rm -f "$RELEASE_DIR_PROBE" "$ERR"
+
+echo
+echo "=== a signal cannot cost a release, or leave a stray one ==="
+# Two windows, each reproduced with a stand-in on PATH that signals the release
+# script alone, as `kill <pid>` does (a terminal's Ctrl-C reaches the whole
+# process group and never showed either).
+#
+#   between the two swap renames: the previous release had been set aside and
+#     the EXIT cleanup deleted it together with the staged one, so a TERM in a
+#     window of milliseconds left no release at all.
+#   during a build: the script cleaned up and exited while `go build` ran on,
+#     recreated the staging directory (`go build -o` creates parents) and left an
+#     officially named binary in it.
+#
+# The same run records the toolchain every go invocation saw, under an ambient
+# GOTOOLCHAIN the release must override.
+REAL_GO="$(command -v go)"; REAL_MV="$(command -v mv)"
+SIG="$(mktemp -d)"
+cat >"$SIG/go" <<STANDIN
+#!/usr/bin/env bash
+printf '%s\n' "\${GOTOOLCHAIN-<unset>}" >>"$SIG/toolchain.seen"
+if [[ "\$1" == build && "\${SHIM_MODE:-}" == orphan ]]; then
+  out=""; prev=""
+  for a in "\$@"; do [[ "\$prev" == -o ]] && out="\$a"; prev="\$a"; done
+  kill -TERM "\$(cat "$SIG/script.pid")"
+  sleep 4   # finish late, the way an orphaned build does
+  mkdir -p "\$(dirname "\$out")" && echo "orphaned build output" >"\$out"
+  exit 0
+fi
+exec "$REAL_GO" "\$@"
+STANDIN
+cat >"$SIG/mv" <<STANDIN
+#!/usr/bin/env bash
+"$REAL_MV" "\$@"; rc=\$?
+# The rename that sets the previous release aside is the one into
+# .release-old.*/release. Signal the release script once it has happened.
+if [[ "\${SHIM_MODE:-}" == midswap && "\${!#}" == */.release-old.*/release ]]; then
+  kill -TERM "\$(cat "$SIG/script.pid")"
+fi
+exit \$rc
+STANDIN
+chmod +x "$SIG/go" "$SIG/mv"
+run_signalled() { # <mode> -> the release script's exit code
+  PATH="$SIG:$PATH" SHIM_MODE="$1" GOTOOLCHAIN=local RELEASE_TARGETS=linux/amd64 VERSION=v9.9.9 \
+    ./scripts/build-release.sh >/dev/null 2>&1 &
+  local pid=$!
+  echo "$pid" >"$SIG/script.pid"
+  wait "$pid"
+}
+previous_release() {
+  mkdir -p build/release
+  echo "previous binary" >build/release/twilightd-v0.0.1-linux-amd64
+  ( cd build/release && cksum twilightd-v0.0.1-linux-amd64 >SHA256SUMS )
+}
+
+previous_release; before="$(release_snapshot)"
+: >"$SIG/toolchain.seen"
+run_signalled midswap; rc=$?
+check "TERM between the two renames exits 143"    "143"  "$rc"
+check "midswap: previous release is back, intact" "same" "$([[ "$(release_snapshot)" == "$before" ]] && echo same || echo changed)"
+check "midswap: nothing set aside or staged left" "0"    "$(leftovers)"
+
+# That run built a whole target before it was signalled, under GOTOOLCHAIN=local.
+PINNED="go$(awk '/^go [0-9]/ { print $2; exit }' go.mod)"
+check "probe: an ambient GOTOOLCHAIN reaches go"  "local" "$(GOTOOLCHAIN=local go env GOTOOLCHAIN)"
+check "go was invoked during the release"         "yes"   "$([[ -s "$SIG/toolchain.seen" ]] && echo yes || echo no)"
+check "every invocation used go.mod's toolchain"  "$PINNED" "$(LC_ALL=C sort -u "$SIG/toolchain.seen" | tr '\n' ' ' | sed 's/ $//')"
+rm -rf build/release
+
+# The notices script pins the toolchain itself, for stand-alone runs. Inside a
+# release it inherits the pin, so only a run on its own can show that its own
+# pin works; the output goes under build/ where it cannot trip the untracked guard.
+: >"$SIG/toolchain.seen"
+mkdir -p build
+PATH="$SIG:$PATH" GOTOOLCHAIN=local RELEASE_TARGETS=linux/amd64 ./scripts/third-party-notices.sh build/THIRD_PARTY_NOTICES.probe >/dev/null 2>&1; rc=$?
+check "notices run stand-alone under the probe"   "0"     "$rc"
+check "stand-alone notices used go.mod's toolchain" "$PINNED" "$(LC_ALL=C sort -u "$SIG/toolchain.seen" | tr '\n' ' ' | sed 's/ $//')"
+rm -f build/THIRD_PARTY_NOTICES.probe
+
+previous_release; before="$(release_snapshot)"
+run_signalled orphan; rc=$?
+check "TERM during a build exits 143"             "143"  "$rc"
+sleep 6   # longer than the stand-in's delay: an orphaned build would have finished
+check "orphan: the build ended with the script"   "0"    "$(leftovers)"
+check "orphan: previous release untouched"        "same" "$([[ "$(release_snapshot)" == "$before" ]] && echo same || echo changed)"
+rm -rf build/release "$SIG"
+
 make build >/dev/null 2>&1   # leave a normally-stamped binary behind
 
 echo

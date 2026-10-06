@@ -155,11 +155,17 @@ when:
 - `go.mod` or `go.sum` would change;
 - any target fails to build, or the staged release does not verify against its own
   `SHA256SUMS`;
-- `RELEASE_DIR` is not a relative path below the repository.
+- `RELEASE_DIR` is not a normalised path under the git-ignored `build/` directory (the release
+  directory is replaced wholesale, so it may only name a place whose loss costs nothing).
+
+A signal ends the build in flight along with the script, and a run interrupted between setting
+the previous release aside and moving the new one into place puts the previous release back.
 
 The environment cannot change what is built. Releases run with `GOENV=off GOWORK=off
-GOFLAGS=-mod=readonly CGO_ENABLED=0`, `GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off`, and an empty
-`GOEXPERIMENT`. Settings such as `GOPROXY` or `GOPRIVATE` must therefore be passed as real
+GOFLAGS=-mod=readonly CGO_ENABLED=0`, `GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off`, an empty
+`GOEXPERIMENT`, and `GOTOOLCHAIN` pinned to the `go` directive of the commit's `go.mod`, so the
+Go version on the host does not change the binaries (go fetches the pinned toolchain if the
+host's differs). Settings such as `GOPROXY` or `GOPRIVATE` must therefore be passed as real
 environment variables, not through `go env -w`. A release works offline (`GOPROXY=off`) when
 the module cache already holds what the build needs.
 
