@@ -93,12 +93,28 @@
   text-decoration: none;
 }
 
+/* Readiness lines: body-secondary colour and size, so they are legible
+   (7.0:1 dark, 7.7:1 light); the muted token is 3.2:1 and too faint for text
+   a reader must not miss. */
 .statusNote {
-  font-size: var(--text-xs);
-  color: var(--tw-fg-muted);
-  max-width: 540px;
+  font-size: var(--text-sm);
+  color: var(--tw-fg-secondary);
+  max-width: 620px;
   margin: 0 auto;
   line-height: 1.6;
+}
+
+.statusNote + .statusNote {
+  margin-top: 0.4rem;
+}
+
+.statusNote strong {
+  color: var(--tw-fg-primary);
+  font-weight: 600;
+}
+
+.statusNote code {
+  font-size: 0.9em;
 }
 
 .main {
