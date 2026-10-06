@@ -306,7 +306,10 @@ echo "=== RELEASE_DIR may only name a place under build/ ==="
 : >"$RELEASE_DIR_PROBE"
 ERR="$(mktemp)"
 refused=0; total=0
-for bad in .git docs x app . ./ .// ./. build build/ build/. build/./release build/../docs build//release /tmp/release ../release; do
+# The last one carries a newline: a component check that stops at a line end
+# never sees the `..` after it, and git normalises `..` when deciding what is
+# ignored, so it resolved to an ignored directory outside build/.
+for bad in .git docs x app . ./ .// ./. build build/ build/. build/./release build/../docs build//release /tmp/release ../release $'build/x\n/../../docs'; do
   total=$((total + 1))
   RELEASE_DIR="$bad" RELEASE_TARGETS=linux/amd64 VERSION=v9.9.9 ./scripts/build-release.sh >/dev/null 2>"$ERR"; rc=$?
   if [[ $rc -ne 0 ]] && grep -q 'RELEASE_DIR' "$ERR"; then
@@ -394,6 +397,16 @@ check "probe: an ambient GOTOOLCHAIN reaches go"  "local" "$(GOTOOLCHAIN=local g
 check "go was invoked during the release"         "yes"   "$([[ -s "$SIG/toolchain.seen" ]] && echo yes || echo no)"
 check "every invocation used go.mod's toolchain"  "$PINNED" "$(LC_ALL=C sort -u "$SIG/toolchain.seen" | tr '\n' ' ' | sed 's/ $//')"
 rm -rf build/release
+
+# The notices script pins the toolchain itself, for stand-alone runs. Inside a
+# release it inherits the pin, so only a run on its own can show that its own
+# pin works; the output goes under build/ where it cannot trip the untracked guard.
+: >"$SIG/toolchain.seen"
+mkdir -p build
+PATH="$SIG:$PATH" GOTOOLCHAIN=local RELEASE_TARGETS=linux/amd64 ./scripts/third-party-notices.sh build/THIRD_PARTY_NOTICES.probe >/dev/null 2>&1; rc=$?
+check "notices run stand-alone under the probe"   "0"     "$rc"
+check "stand-alone notices used go.mod's toolchain" "$PINNED" "$(LC_ALL=C sort -u "$SIG/toolchain.seen" | tr '\n' ' ' | sed 's/ $//')"
+rm -f build/THIRD_PARTY_NOTICES.probe
 
 previous_release; before="$(release_snapshot)"
 run_signalled orphan; rc=$?

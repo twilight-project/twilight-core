@@ -43,12 +43,15 @@ git rev-parse HEAD >/dev/null 2>&1 || refuse "not a git repository, so the commi
 # refused a legitimate name such as build/v1..2 for containing two dots.
 #
 # Each component is checked, not the string: `..` as a component climbs out,
-# while `v1..2` is only a name. The ignore check is the backstop for the rule
-# itself: if build/ ever stopped being ignored, a release directory there would
-# be tracked content again.
+# while `v1..2` is only a name. A control character is refused outright: `read`
+# below stops at a newline, so a value with `..` components after one would be
+# checked only up to the newline, and git normalises `..` when deciding whether
+# a path is ignored. The ignore check is the backstop for the rule itself: if
+# build/ ever stopped being ignored, a release directory there would be tracked
+# content again.
 release_dir_ok() {
   local dir="$1" part parts
-  [[ "$dir" == build/* && "$dir" != */ ]] || return 1
+  [[ "$dir" == build/* && "$dir" != */ && "$dir" != *[[:cntrl:]]* ]] || return 1
   # read -a, not an unquoted expansion: a component such as `*` must stay a
   # name here and not expand to whatever is in the working directory.
   IFS=/ read -r -a parts <<<"$dir"
@@ -131,7 +134,10 @@ STAGE=""; OLD=""; SWAPPED=0; CHILD=""
 # are, because a leftover directory costs disk space and a wrong guess costs a
 # release.
 cleanup() {
-  rm -rf "$SRC" "$META"
+  # A second signal must not interrupt the restore, and the restore comes
+  # before anything slow: a TERM during the removal of the exported source
+  # would otherwise leave the previous release stranded under $OLD unannounced.
+  trap '' INT TERM HUP
   if [[ -n "$OLD" && -e "$OLD/release" ]]; then
     if (( SWAPPED )); then
       rm -rf "$OLD"
@@ -144,6 +150,7 @@ cleanup() {
     rm -rf "$OLD"
   fi
   [[ -n "$STAGE" ]] && rm -rf "$STAGE"
+  rm -rf "$SRC" "$META"
   return 0
 }
 trap cleanup EXIT
@@ -157,6 +164,9 @@ on_signal() { # <exit code>
   trap - INT TERM HUP
   if [[ -n "$CHILD" ]]; then
     kill -TERM -- "-$CHILD" 2>/dev/null || kill -TERM "$CHILD" 2>/dev/null || true
+    # A stopped job cannot act on the TERM. Being in a background group, the
+    # step is stopped if it touched the terminal while `stty tostop` was set.
+    kill -CONT -- "-$CHILD" 2>/dev/null || kill -CONT "$CHILD" 2>/dev/null || true
     wait "$CHILD" 2>/dev/null || true
     CHILD=""
   fi
@@ -170,10 +180,15 @@ trap 'on_signal 129' HUP
 # process group of its own, and waits for it. The group is what on_signal ends:
 # the toolchain runs compilers and a linker as children, and ending only the
 # direct child would leave those writing into the staging directory.
+#
+# Standard input is detached, since a background group that reads the terminal
+# is stopped rather than served. Writing to the terminal is still allowed by
+# default; a terminal with `stty tostop` set stops the step at its first write,
+# and the run waits until it is continued or ended (on_signal continues it).
 in_group() {
   local rc
   set -m
-  ( "$@" ) &
+  ( "$@" ) </dev/null &
   CHILD=$!
   set +m
   wait "$CHILD"; rc=$?
@@ -198,7 +213,8 @@ git archive HEAD | tar -x -C "$SRC" || refuse "could not export HEAD"
 # line in go.mod would not pin anything under auto, and `go mod tidy` removes it
 # when it equals the go directive.)
 GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "$SRC/go.mod")"
-[[ -n "$GO_VERSION" ]] || refuse "could not read the go directive from the committed go.mod"
+[[ "$GO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+)?$ ]] \
+  || refuse "the committed go.mod must name a full toolchain version in its go directive (1.N.P), to pin the build to one; found '$GO_VERSION'"
 export GOTOOLCHAIN="go$GO_VERSION"
 
 # The binaries statically link third-party modules whose licenses must travel with
