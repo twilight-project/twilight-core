@@ -15,7 +15,7 @@ all nodes agree.
 **Covers:** node startup and basic cross-node agreement (app hash, validators
 hash, next-validators hash) at a common height.
 
-**Does not cover:** rewards finalization. The default rewards epoch is 17,280
+**Does not cover:** rewards finalization. The default rewards epoch is 360
 blocks, so the default smoke (which reaches a low height) never closes a rewards
 epoch.
 
@@ -60,7 +60,7 @@ slot — distribution then splits the minted pool across the 4 active slots. See
 :::warning Funded development fixture
 The rewards smoke runs on a **funded** development fixture (the localnet funds two
 accounts with `1,000,000,000,000utwlt` each, so total supply after finalization is
-`2,000,004,161,900utwlt`). It exercises deterministic rewards behavior and exact
+`2,000,149,828,400utwlt`). It exercises deterministic rewards behavior and exact
 supply accounting **under that fixture**. A production **zero-premine**
 monetary-genesis run is a separate case — see
 [Status & Validation](status-and-validation.md).

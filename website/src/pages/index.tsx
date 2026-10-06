@@ -56,8 +56,8 @@ export default function Home(): React.ReactElement {
           <h1 className={styles.title}>Twilight Chain</h1>
           <p className={styles.tagline}>
             A minimal Cosmos SDK Proof-of-Authority chain with scheduled{" "}
-            <code>utwlt</code> block rewards — finalized per epoch and claimed to
-            CoreSlot operators.
+            <code>utwlt</code> block rewards — finalized per epoch and released to
+            CoreSlot operators through settlement.
           </p>
           <div className={styles.ctaRow}>
             <Link className={styles.ctaPrimary} to="/getting-started/overview">

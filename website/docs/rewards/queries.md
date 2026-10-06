@@ -38,7 +38,7 @@ twilightd rewards-query cumulative-emitted --node <rpc>
 
 ## Pagination
 
-`slot-rewards` and `current-active-blocks` are paginated (their collections grow
+`epoch-entitlements` and `current-active-blocks` are paginated (their collections grow
 over time). They accept the standard Cosmos pagination flags:
 
 | Flag | Meaning |
@@ -51,8 +51,8 @@ over time). They accept the standard Cosmos pagination flags:
 | `--reverse` | Descending order |
 
 The non-paginated commands do not expose these flags. Ordering is deterministic:
-`slot-rewards` returns ascending epoch; `current-active-blocks` returns ascending
-slot id.
+`epoch-entitlements` returns ascending slot id within the requested epoch;
+`current-active-blocks` returns ascending slot id.
 
 ## Selected output fields
 
@@ -73,5 +73,6 @@ slot id.
   `info.next_threshold`, `info.remaining_until_next_halving`,
   `info.has_next_halving`.
 
-A REST/gRPC-gateway surface is not wired in the current version (consistent with
-CoreSlot); these are gRPC/CLI queries.
+The same queries are served over the REST/gRPC-gateway surface on the API server
+(default port `1317`, enabled with `[api] enable = true` in `app.toml`); gRPC
+remains canonical.

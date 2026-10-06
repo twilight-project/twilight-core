@@ -32,9 +32,9 @@ suspended or removed before the epoch closes. This is safe because CoreSlot
 retains the slot row, operator/payout addresses, and reward-weight row on suspend
 and remove (see [Consensus & CoreSlot](../chain/consensus-and-coreslot.md)).
 
-Finalization reads each credited slot's snapshot (`GetSlot`, `GetRewardWeight`) —
-collections that suspend/remove retain — never the operator/consensus indexes that
-remove deletes.
+Finalization reads each credited slot's record (`GetSlot`) — a collection that
+suspend/remove retains — never the operator/consensus indexes that remove
+deletes.
 
 ## Querying the open epoch
 

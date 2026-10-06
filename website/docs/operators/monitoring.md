@@ -44,7 +44,7 @@ service-name = ""
 # Attached to every series. The chain id is the one label a fleet dashboard needs.
 # The generated file writes this as `global-labels = [` and `]` on two lines; replace
 # both lines with this one.
-global-labels = [["chain_id", "twilight-testnet-1"]]
+global-labels = [["chain_id", "<chain-id>"]]
 ```
 
 In `config.toml`, change these values in the existing `[instrumentation]` table, on a
@@ -53,7 +53,7 @@ In `config.toml`, change these values in the existing `[instrumentation]` table,
 ```toml
 [instrumentation]
 prometheus = true
-prometheus_listen_addr = "10.0.0.5:26660"
+prometheus_listen_addr = "<private-ip>:26660"
 ```
 
 The `prometheus_listen_addr` that `twilightd init` writes is `":26660"`, which
@@ -76,7 +76,7 @@ every `twilight_*` series below, with no extra listener:
 ```yaml
 - job_name: twilightd
   static_configs:
-    - targets: ["10.0.0.5:26660"]
+    - targets: ["<private-ip>:26660"]
 ```
 
 **Never bind either endpoint to `0.0.0.0`.** `twilightd_build_info` carries the

@@ -52,8 +52,8 @@ Each behavior below is exercised by the evidence type named next to it.
   store) and Cosmovisor itself, which the drill swaps by hand. See
   [Upgrade & Export/Import](../operators/upgrade-and-export-import.md).
 - **Weighted rewards and fee-funded rewards are not active.** They are code-gated
-  and rejected until implemented. The reward weight recorded on an entitlement is
-  metadata only and has no payout effect — payout is by
+  and rejected until implemented. A slot's reward weight is CoreSlot metadata
+  only, is not recorded on an entitlement, and has no payout effect — payout is by
   [active-block participation](../rewards/economics.mdx).
 - **Code-gated behavior is not user-facing functionality.** Anything not enabled
   in the current implementation is simply not available.

@@ -28,7 +28,8 @@ Finalized epoch aggregate. Args: `epoch` (uint, required, > 0). Returns
 `NotFound` if the epoch is not finalized. → `epoch_reward`: `epoch_number`,
 `start_height`, `end_height`, `minted_emission`, `carry_in`,
 `distributable_fees`, `treasury_amount`, `reward_pool`, `allocated_amount`,
-`carry_out`, `cumulative_emitted_after_epoch`, `rewards[]`.
+`carry_out`, `cumulative_emitted_after_epoch`, `rewards[]` (always empty; the
+obligation an epoch creates is a slot entitlement).
 
 ## `cumulative-emitted`
 → `cumulative_emitted`, `max_supply`.

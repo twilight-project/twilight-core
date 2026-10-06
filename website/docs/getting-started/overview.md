@@ -10,7 +10,8 @@ Twilight is a minimal Cosmos SDK / CometBFT **Proof-of-Authority** chain:
   validator-set updates. Validator membership is not token-staked: there is no
   staking, delegation, or slashing path.
 - **Rewards** (`x/rewards`) mints a bounded `utwlt` reward pool each epoch and
-  pays finalized rewards to the active operators' snapshotted payout addresses.
+  holds finalized rewards as per-slot entitlements until settlement in `x/mining`
+  releases them.
 
 If you are new, read in this order:
 

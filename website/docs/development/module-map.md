@@ -21,7 +21,7 @@ Omitted: `staking`, `distribution`, `slashing`, `governance`, `mint`.
 
 ```mermaid
 graph LR
-    Rewards -->|reads active slots, payout, reward-weight metadata| CoreSlot
+    Rewards -->|reads active slots, slot records (payout address)| CoreSlot
     Rewards -->|mint / send utwlt| Bank
     Rewards -->|module addresses| Auth
     CoreSlot -->|validator updates| Runtime
@@ -46,6 +46,7 @@ emitter. Rewards uses modern error-only lifecycle methods. See
 
 ## CoreSlot read interface
 
-Rewards consumes exactly five read methods from CoreSlot:
-`GetActiveSlots`, `GetSlot`, `GetRewardWeight`, `GetAuthority`,
-`GetEmergencyAuthority`. This is the entire surface between the two modules.
+Rewards consumes exactly four read methods from CoreSlot:
+`GetActiveSlots`, `GetSlot`, `GetAuthority`, `GetEmergencyAuthority`. This is
+the entire surface between the two modules; `GetRewardWeight` is deliberately
+absent.
