@@ -4,7 +4,7 @@ title: Settlement
 
 # Settlement (`x/mining`)
 
-Settlement is how reward value leaves escrow. When `x/rewards` finalizes an epoch it
+Settlement is how entitlement value leaves escrow. When `x/rewards` finalizes an epoch it
 mints the epoch's emission into the rewards module account and records one
 **entitlement** per eligible slot; the money stays there until `x/mining` releases it.
 Settlement releases an entitlement through two kinds of transaction: **chunks**, which
@@ -13,8 +13,8 @@ payout address snapshotted when the epoch closed and closes the obligation for g
 
 `x/mining` holds no bank keeper and no funds. Every transfer it authorizes is performed
 by `x/rewards` against the entitlement that module owns, under that module's own
-ceiling, so a defect in settlement cannot widen what leaves escrow. Consensus never pays
-anyone on a timer: there is no automatic payout and no automatic finalization.
+ceiling, so a defect in settlement cannot widen what leaves escrow. Settlement never pays
+anyone on a timer: no entitlement is paid or finalized automatically.
 
 ## Value flow
 
@@ -62,20 +62,23 @@ it stood at the end of the previous block.
 ## Modes
 
 Each settlement carries a mode derived from the chain's distribution-mode history at its
-epoch:
+epoch. This version creates settlements in one mode only; the other two are defined for
+a later selection tranche, and no code path produces them today:
 
 | Settlement mode | Chunks | Finalization |
 |---|---|---|
-| `TRUSTED_AS` — the current profile | the slot's settlement address may pay participants, up to the full entitlement, before the deadline | the settlement address before the deadline; anyone from the deadline on |
-| `OPERATOR_ONLY` | none: the whole entitlement is the operator's | anyone, immediately |
-| `SELECTED_PARTICIPANTS` | defined for a protocol-selection mode that has no producer in this version; an epoch bound to protocol selection is refused at materialization | — |
+| `TRUSTED_AS` — the only mode this version creates | the slot's settlement address may pay participants, up to the full entitlement, before the deadline | the settlement address before the deadline; anyone from the deadline on |
+| `OPERATOR_ONLY` — not created in this version | none: the whole entitlement would be the operator's | anyone, immediately |
+| `SELECTED_PARTICIPANTS` — not created in this version | defined for a protocol-selection mode that has no producer; an epoch bound to protocol selection is refused at materialization | — |
 
 ## Chunks
 
 `tx mining submit-settlement-chunk` releases one batch of participant payouts against an
 open settlement. It is admitted only if, in this order:
 
-1. release is not paused — checked first, before the settlement is even read;
+1. release is not paused — checked before the settlement is read; only the message's
+   own shape (a nonzero slot and epoch, 1 to 32 lines, non-empty recipients,
+   canonical amounts) is checked earlier;
 2. the settlement exists, is `OPEN`, and its mode permits chunks;
 3. the signer is the slot's **settlement address** as recorded in CoreSlot. The slot's
    lifecycle status is deliberately not consulted: removal freezes that address, so a
@@ -98,10 +101,10 @@ What the signer cannot do: exceed the entitlement, redirect the operator's remai
 skip or reorder chunks, replay one, open a settlement, or move funds from escrow
 directly. What it can do is the stated threat model: a compromised settlement credential
 can direct participant payouts up to the full entitlement of every open settlement of
-that slot. The responses are rotating the slot's settlement address (CoreSlot's
-`MsgUpdateSettlementAddress`, see the
-[CoreSlot operator guide](../operators/coreslot-operator-guide.md)) or a chain-wide
-[pause](transactions.md#pause--resume).
+that slot. The responses are rotating the slot's settlement address
+(`tx coreslot update-settlement <slot-id> <address>`, signed by the slot's operator;
+refused once the slot is suspended or removed, which freezes the address) or a
+chain-wide [pause](transactions.md#pause--resume).
 
 ## Finalization
 
@@ -120,7 +123,7 @@ Who may finalize follows the deadline, and the recorded reason names the
 |---|---|---|
 | `AUTHORIZED_EARLY` | before the deadline | the settlement address only. It forfeits the rest of the participant window, possibly having distributed nothing |
 | `PERMISSIONLESS_AFTER_DEADLINE` | at or after the deadline | any account, the settlement address included |
-| `PERMISSIONLESS_OPERATOR_ONLY` | immediately | any account (operator-only mode) |
+| `PERMISSIONLESS_OPERATOR_ONLY` | immediately | any account (operator-only mode, which this version does not create) |
 
 A zero remainder finalizes without a transfer. Finalization is refused while paused.
 There is no queue, sweep or retry: an open settlement may stay open indefinitely past
@@ -131,24 +134,25 @@ changes is who may do so.
 
 | Parameter | Default | Bound |
 |---|---|---|
-| `settlement_window_epochs` | `2` | — |
-| `max_recipients_per_chunk` | `32` | at most 32 |
-| `max_chunks_per_settlement` | `4` | at most 4 |
+| `settlement_window_epochs` | `2` | at least 1, no upper bound |
+| `max_recipients_per_chunk` | `32` | 1 to 32 |
+| `max_chunks_per_settlement` | `4` | 1 to 4 |
 | `min_recipient_payout_amount` | `10000` | at least 10,000 `utwlt`, an immutable floor |
 
 Settlement parameters and the distribution mode are **versioned histories**: a version
 becomes effective at an epoch boundary and governs epochs two ahead of it.
 `mining-query settlement-params-for-epoch <epoch>` shows the binding epoch and the
 version an epoch uses. A scheduled change is promoted in the EndBlock that closes the
-epoch before it takes effect. In the current version no transaction schedules one; the
-histories come from genesis or from an upgrade handler.
+epoch before it takes effect. Today the histories come only from genesis: no transaction
+schedules a change, and no shipped upgrade handler writes one. A future upgrade handler
+is the only way a version could be added.
 
 ## Queries, transactions and events
 
 | Command | Returns |
 |---|---|
-| `twilightd mining-query settlement <slot-id> <epoch>` | one row: mode, bound versions, `next_chunk_index`, `finalized`, `finalized_height`, `finalization_reason` |
-| `twilightd mining-query open-settlements [slot-id]` | open settlements, per slot in ascending epoch (paginated) |
+| `twilightd mining-query settlement <slot-id> <epoch>` | the row (mode, bound versions, `next_chunk_index`, `finalized`, `finalized_height`, `finalization_reason`) plus its entitlement, released and remaining amounts, payout address, participant ceiling, anchor and deadline clocks, the current clock, and whether finalization is permissionless now |
+| `twilightd mining-query open-settlements <slot-id>` | one slot's open settlements, ascending epoch (paginated) |
 | `twilightd mining-query settlement-clock` | the clock |
 | `twilightd mining-query settlement-params-for-epoch <epoch>` | the parameters an epoch binds, and its binding epoch |
 | `twilightd mining-query settlement-params-version[s]`, `distribution-mode-version[s]`, `selection-params-version[s]` | the histories |

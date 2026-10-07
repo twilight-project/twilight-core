@@ -17,18 +17,29 @@ How a block flows through the modules. The order is fixed in `app/config.go`:
 `x/upgrade` runs before anything else in the block. If a plan scheduled by the
 CoreSlot authority names this height, a node running the new binary runs the
 registered handler once and continues; a node still on the old binary refuses the
-block and stops at this height. Nothing happens on any other block. See
+block and stops at this height. On other blocks it does nothing, with two
+exceptions: a node whose binary already contains the handler for a pending plan
+halts at every block before the plan's height (so do not swap early), and on its
+first block after a restart a node refuses to run if the handler of the last
+completed upgrade is missing from its binary. See
 [Upgrade & Export/Import](../operators/upgrade-and-export-import.md). `auth` follows
-with the SDK's own pre-blocker. Neither touches rewards or settlement state.
+with the SDK's own pre-blocker. Outside an upgrade height neither touches rewards or
+settlement state; at the height, the handler's migrations may.
 
 ## BeginBlock — `rewards`
 
-CoreSlot and mining have no BeginBlocker. The rewards `BeginBlock`:
+CoreSlot and mining have no BeginBlocker. The rewards `BeginBlock`, in one cache
+context:
 
-1. loads `RewardsState` and the current epoch config;
-2. reads the active CoreSlot set (`GetActiveSlots`);
-3. validates every returned slot is active (fail-closed on a contract violation);
-4. increments the `(current_epoch, slot)` active-block counter for each.
+1. opens the next epoch if this block starts one — the epoch counter advances here,
+   consuming any scheduled epoch configuration and resetting the open counters;
+2. applies a pause or resume transition due at this height, before anything is
+   sampled;
+3. reads the state, the pause flag, and the active CoreSlot set (`GetActiveSlots`),
+   validating that every returned slot is active (fail-closed on a contract
+   violation);
+4. increments the `(current_epoch, slot)` active-block counter for each slot, when
+   accrual is enabled.
 
 Pausing does not stop epoch time: numbering advances and epochs still finalize. A
 paused block is not reward-enabled, so it credits nothing.
@@ -53,8 +64,8 @@ stood at the end of the previous block.
    reward configuration scheduled for the epoch that follows. Finalization is
    unconditional at the boundary — a pause does not defer it — and it does **not**
    advance the epoch counter: the next epoch becomes current at its own first
-   BeginBlock, so a query at the closing height sees
-   `last_finalized_epoch == current_epoch`.
+   BeginBlock, so at the closing height `epoch-info` still reports
+   `current_epoch = N` while `epoch-reward N` already exists.
 3. **Mining**, in one cache context: ticks the settlement clock if the block's
    beginning-of-block pause state permitted release; if an epoch closed in this
    block, materializes its settlement set (one `OPEN` settlement per entitlement,
@@ -93,8 +104,9 @@ that commits only on full success. If any step errors, the error propagates thro
 
 ## Epoch boundary
 
-The configured end height is
-`current_epoch_start_height + epoch_length_blocks − 1` using the **current epoch
-snapshot's** length (not the latest params). The current epoch always finalizes
-under its own snapshot; queued params apply to the next epoch. See
+The end height of epoch N is `current_epoch_start_height + epoch_length_blocks − 1`,
+the block before epoch N+1 begins; it is derived from the epoch-configuration
+history that governs the epoch, fixed when the epoch opened, and never stored.
+`epoch_length_blocks` in the parameters is frozen genesis data that no transaction
+changes, so a parameter update never moves a boundary. See
 [Epoch Lifecycle](../rewards/epoch-lifecycle.md).

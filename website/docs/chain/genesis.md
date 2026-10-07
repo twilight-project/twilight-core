@@ -28,8 +28,11 @@ the version indexes) from the rows it imported rather than importing them.
 
 | Account | Permission |
 |---|---|
-| `rewards` | `Minter` |
-| `rewards_fee_pool` | _(none)_ |
+| `fee_collector` | _(none)_ |
+| `coreslot-authority` | _(none)_ — the keyless address that `x/upgrade` is bound to |
+| `coreslot-emergency` | _(none)_ |
+| `rewards` | `Minter` — the only minter |
+| `rewards_fee_pool` | _(none)_ — dormant |
 
 These are created by the `auth` module from `ModuleAccountPermissions` in
 `app/config.go`, not lazily. See [Module Accounts](../reference/module-accounts.md).
@@ -70,7 +73,8 @@ See [Settlement](../rewards/settlement.md) for what each of these governs.
 
 ```bash
 twilightd init <moniker> --chain-id <chain-id>
-# the generated genesis includes the default genesis of every wired module
+# the generated genesis includes the default genesis of every module that has
+# genesis state (consensus has none; upgrade's is empty)
 jq '.app_state.coreslot' ~/.twilightd/config/genesis.json
 jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 jq '.app_state.mining' ~/.twilightd/config/genesis.json

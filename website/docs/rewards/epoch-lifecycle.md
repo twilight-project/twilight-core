@@ -15,9 +15,9 @@ The configured end height of the open epoch is:
 current_epoch_end_height = current_epoch_start_height + epoch_length_blocks − 1
 ```
 
-This uses the **current epoch snapshot's** length, captured when the epoch opened
-— not the latest params. So a queued `epoch_length_blocks` change does not move
-the current epoch's end; it applies to the next epoch.
+The length comes from the epoch-configuration history that governs the epoch, fixed
+when the epoch opened. `epoch_length_blocks` in the parameters is frozen genesis
+data that no transaction changes, so a parameter update never moves a boundary.
 
 Query it:
 
@@ -33,23 +33,27 @@ atomically (in a cache context, so any fault rolls back entirely). The boundary 
 unconditional: a pause does not defer it, a paused epoch simply closes with only
 the blocks before the pause counted.
 
-1. Compute the clipped epoch emission ([economics](economics.mdx)). If emissions
-   are paused, emission is zero and cumulative emitted does not advance.
+1. Compute the clipped epoch emission ([economics](economics.mdx)). Emission counts
+   only reward-enabled blocks, so a fully paused epoch emits zero and cumulative
+   emitted does not advance.
 2. Assert `cumulative_emitted + emission ≤ max_supply` **before** minting.
 3. Mint the (positive) emission as `utwlt` into the `rewards` account.
-4. Build the pool: `emission + carry_in + fees − treasury` (fees 0, treasury 0 by
-   default).
+4. Send the configured treasury share of the emission to the treasury address (zero
+   by default, and then nothing is sent), and build the pool:
+   `emission + carry_in + fees − treasury` (fees 0).
 5. Read the epoch's active-block rows and allocate uniformly by active blocks.
 6. Write the immutable epoch aggregate and one slot entitlement per eligible slot.
 7. Set `carry_forward_remainder = carryOut`; update `cumulative_emitted`.
 8. Delete the closed epoch's active-block rows.
-9. Promote any reward configuration scheduled for the next epoch.
+9. Activate pending params, if any, carrying the current enable flags over, and
+   clear the queue.
+10. Promote any reward configuration scheduled for the next epoch.
 
 The epoch counter does **not** advance here: the next epoch becomes current at its
-own first BeginBlock, with `current_epoch_start_height = end + 1`. A query at the
-closing height therefore sees `last_finalized_epoch == current_epoch`. In the same
-block, `x/mining` materializes the closed epoch's settlement set — see
-[Settlement](settlement.md).
+own first BeginBlock, with `current_epoch_start_height = end + 1`. At the closing
+height, `epoch-info` therefore still reports `current_epoch = N` while
+`epoch-reward N` already exists. In the same block, `x/mining` materializes the
+closed epoch's settlement set — see [Settlement](settlement.md).
 
 ## Pause interactions
 

@@ -20,9 +20,9 @@ active operator set but **never** manages validators itself.
    finalizes the epoch: it mints the clipped block emission, builds the reward
    pool (emission + carry-in − treasury), allocates it across operators by
    active blocks, writes an immutable epoch aggregate plus one **slot
-   entitlement** per eligible slot, advances the carry-forward remainder and
-   cumulative emitted, and opens the next epoch.
-3. **Settlement** — value leaves escrow only through `x/mining`, which pays the
+   entitlement** per eligible slot, and advances the carry-forward remainder and
+   cumulative emitted. The next epoch opens at the following BeginBlock.
+3. **Settlement** — entitlement value leaves escrow only through `x/mining`, which pays the
    epoch's participants and returns the remainder to the slot's **snapshotted
    payout address**. Rewards exposes this as a constrained keeper boundary with
    no transaction of its own. See [Settlement](settlement.md).

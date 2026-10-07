@@ -15,7 +15,7 @@ modules are **omitted**; `auth`, `bank`, `consensus` and `upgrade` are present.
 
 | Module | Role |
 |---|---|
-| `x/coreslot` | Owns the validator/operator slot set; the **only** module that emits validator updates. Stores each slot's operator, payout and settlement addresses, reward weight, and status. Holds the chain's one authority, which also schedules upgrades. Exposes read-only interfaces to rewards and mining. |
+| `x/coreslot` | Owns the validator/operator slot set; the **only** module that emits validator updates. Stores each slot's operator, payout and settlement addresses, reward weight, and status. Holds the chain's authority, which also schedules upgrades, and the emergency authority. Exposes read-only interfaces to rewards and mining. |
 | `x/rewards` | Reads the active CoreSlot set, counts active blocks per epoch, finalizes epochs, mints `utwlt`, and creates the per-slot entitlements that settlement later releases. Owns the escrow and the only code that moves value out of it. Does **not** manage validators. |
 | `x/mining` | Settlement: materializes each finalized epoch's settlement set against a block-driven settlement clock, admits participant payout chunks, and finalizes a settlement by releasing the remainder to the snapshotted payout address. Holds **no** bank keeper; every transfer goes through `x/rewards`. See [Settlement](../rewards/settlement.md). |
 | `upgrade` | The standard `x/upgrade` module, reachable only through CoreSlot's `ScheduleUpgrade` / `CancelUpgrade`: the module's own messages are bound to an authority with no key. See [Upgrade & Export/Import](../operators/upgrade-and-export-import.md). |
