@@ -38,6 +38,7 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "rewards/overview", label: "Overview" },
         { type: "doc", id: "rewards/economics", label: "Economics" },
         { type: "doc", id: "rewards/epoch-lifecycle", label: "Epoch Lifecycle" },
+        { type: "doc", id: "rewards/settlement", label: "Settlement" },
         { type: "doc", id: "rewards/active-block-accounting", label: "Active-Block Accounting" },
         { type: "doc", id: "rewards/params", label: "Parameters" },
         { type: "doc", id: "rewards/invariants", label: "Invariants" },

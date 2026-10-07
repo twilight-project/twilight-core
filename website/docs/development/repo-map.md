@@ -8,12 +8,13 @@ Top-level layout of `twilight-core`.
 
 | Path | Contents |
 |---|---|
-| `app/` | App wiring (`app.go`), module/account config (`config.go`), encoding, params (`params/`). |
-| `x/coreslot/` | CoreSlot PoA module (validator authority, slots, reward weights). |
-| `x/rewards/` | Rewards module (emission, epochs, allocation, entitlements, params, invariants, events, query/CLI). |
+| `app/` | App wiring (`app.go`), module/account config (`config.go`), the upgrade-handler registry (`upgrades.go`), encoding, params (`params/`). |
+| `x/coreslot/` | CoreSlot PoA module (validator authority, slots, settlement and payout addresses, reward weights, upgrade scheduling). |
+| `x/rewards/` | Rewards module (emission, epochs, allocation, entitlements, the release boundary, params, invariants, events, query/CLI). |
+| `x/mining/` | Settlement module (settlement clock, materialization, chunks, finalization, parameter histories, query/CLI). |
 | `cmd/twilightd/` | The `twilightd` binary and root command (`cmd/twilightd/cmd/root.go`). |
 | `scripts/localnet/` | Localnet `init`/`start`/`agree`/`stop` + `smoke.sh` + `rewards-smoke.sh` + soak/drill scripts. |
-| `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`). |
+| `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`, `twilight.mining.v1`). |
 | `docs/` | Architecture, operator, security, and testing markdown. |
 | `website/` | This Docusaurus documentation site (isolated; does not affect Go builds). |
 | `Makefile` | `build`, `test`, `proto`, `localnet-smoke`, `localnet-rewards-smoke`, drills. |
