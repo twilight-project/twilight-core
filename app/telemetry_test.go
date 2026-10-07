@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/telemetry"
@@ -24,6 +25,8 @@ import (
 	"github.com/twilight-project/twilight-core/app"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	miningkeeper "github.com/twilight-project/twilight-core/x/mining/keeper"
+	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 )
 
 // The telemetry contract.
@@ -259,6 +262,12 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		`twilight_coreslot_pending_authority_nomination{authority_role="primary"}`:   0,
 		`twilight_coreslot_authority_info{authority="` + csParams.Authority + `",emergency_authority="` + csParams.EmergencyAuthority + `"}`: 1,
 		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`:                              1,
+		// Epoch 1 materialized one settlement for slot 1, still open and two
+		// blocks old, far inside its two-epoch window. The values that tell slot
+		// id from epoch, and an overdue settlement from a fresh one, are pinned in
+		// TestTelemetryReportsTheSlotSettlementBacklog.
+		`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`: 1,
+		`twilight_mining_slot_settlement_overdue{slot="1"}`:           0,
 	}
 	for name, want := range expected {
 		got, found := values[name]
@@ -278,6 +287,114 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		_, documented := expected[name]
 		require.True(t, documented, "metric %s is exported but not documented", name)
 	}
+}
+
+// The per-slot settlement gauges on a real chain, with literal values. Slot 1
+// seals epoch 1 while epoch 2 stays open, so its backlog is epoch 2 (an epoch
+// that is not the slot id), and the backlog turns overdue at exactly epoch 2's
+// derived deadline and not one block earlier.
+func TestTelemetryReportsTheSlotSettlementBacklog(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	const (
+		oldest  = `twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`
+		overdue = `twilight_mining_slot_settlement_overdue{slot="1"}`
+	)
+	gauge := func(values map[string]float64, name string) float64 {
+		t.Helper()
+		value, found := values[name]
+		require.True(t, found, "metric %s is not exported", name)
+		return value
+	}
+
+	// Epochs 1 and 2 have both closed and materialized; neither is sealed.
+	chain.commitThrough(t, 2*epochLength+2)
+	values := gather()
+	require.Equal(t, float64(1), gauge(values, oldest))
+	require.Equal(t, float64(0), gauge(values, overdue))
+
+	// The settlement signer seals epoch 1 early; the next block commits it.
+	_, err := miningkeeper.NewMsgServer(chain.app.MiningKeeper).FinalizeSettlement(chain.headContext(),
+		&miningtypes.MsgFinalizeSettlement{Signer: chain.credential, SlotId: 1, Epoch: 1})
+	require.NoError(t, err)
+	chain.commitThrough(t, chain.head+1)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest), "epoch 1 is sealed, so the backlog is epoch 2")
+	require.Equal(t, float64(0), gauge(values, overdue))
+
+	// Epoch 2's deadline, read from the chain rather than restated here.
+	ctx := chain.headContext()
+	settlement, found, err := chain.app.MiningKeeper.GetSettlement(ctx, 1, 2)
+	require.NoError(t, err)
+	require.True(t, found)
+	deadline, err := chain.app.MiningKeeper.SettlementDeadlineClock(ctx, settlement)
+	require.NoError(t, err)
+	clock, err := chain.app.MiningKeeper.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Less(t, clock+1, deadline, "the scenario must start well before the deadline")
+
+	// One tick before the deadline, then the deadline itself. The clock ticks once
+	// per unpaused block, and nothing here pauses.
+	chain.commitThrough(t, chain.head+int64(deadline-1-clock))
+	clock, err = chain.app.MiningKeeper.GetSettlementClock(chain.headContext())
+	require.NoError(t, err)
+	require.Equal(t, deadline-1, clock)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest))
+	require.Equal(t, float64(0), gauge(values, overdue), "one tick before the deadline")
+
+	chain.commitThrough(t, chain.head+1)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest), "later epochs opening do not move the backlog")
+	require.Equal(t, float64(1), gauge(values, overdue), "at the deadline")
+}
+
+// A slot that catches up keeps exporting, at 0 / 0. The monitoring page promises
+// that a series which disappears means the slot left the active set, never that
+// it caught up; this is what makes that promise true.
+func TestTelemetryKeepsExportingACaughtUpSlotAtZero(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+	values := gather()
+	require.Equal(t, float64(1), values[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`])
+
+	_, err := miningkeeper.NewMsgServer(chain.app.MiningKeeper).FinalizeSettlement(chain.headContext(),
+		&miningtypes.MsgFinalizeSettlement{Signer: chain.credential, SlotId: 1, Epoch: 1})
+	require.NoError(t, err)
+	chain.commitThrough(t, chain.head+1)
+
+	values = gather()
+	oldest, found := values[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`]
+	require.True(t, found, "a caught-up slot must keep its series")
+	require.Equal(t, float64(0), oldest)
+	overdue, found := values[`twilight_mining_slot_settlement_overdue{slot="1"}`]
+	require.True(t, found, "a caught-up slot must keep its series")
+	require.Equal(t, float64(0), overdue)
+}
+
+// A per-slot read failure is counted against the mining module and that slot's
+// gauges are skipped: they keep their last value rather than being re-set to a
+// "caught up" 0 / 0. The failure driven here is an index entry whose canonical
+// row is gone, which the keeper refuses to export as a value.
+func TestTelemetryCountsASlotReadFailureAndSkipsTheSlot(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+	before := gather()
+	require.Equal(t, float64(1), before[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`])
+	failuresBefore := before[`twilight_telemetry_read_failures_total{module="mining"}`]
+
+	require.NoError(t, chain.app.MiningKeeper.Settlements.Remove(chain.headContext(),
+		collections.Join(uint64(1), uint64(1))))
+	chain.app.EmitTelemetryForTest()
+
+	after := gather()
+	require.Equal(t, failuresBefore+1, after[`twilight_telemetry_read_failures_total{module="mining"}`],
+		"the failed slot read is counted against the mining module")
+	require.Equal(t, float64(1), after[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`],
+		"the slot's gauge keeps its last value; it is not re-set")
+	require.Equal(t, float64(0), after[`twilight_mining_slot_settlement_overdue{slot="1"}`])
 }
 
 // The authority addresses are exported as labels because the nomination gauge
@@ -356,7 +473,9 @@ var targetLabels = map[string]struct{}{
 func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
 	_, registry := enableTelemetryWithRegistry(t)
 	chain := bootPinnedChain(t)
-	chain.commitThrough(t, 2)
+	// Past the first epoch close, so the per-slot settlement series (and their
+	// slot label) exist to be checked.
+	chain.commitThrough(t, epochLength+2)
 	chain.app.CountTelemetryReadFailureForTest("rewards")
 
 	families, err := registry.Gather()
@@ -381,7 +500,7 @@ func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
 	}
 	// The labels this app is known to export. A test that saw none of them
 	// would pass by looking at nothing.
-	for _, name := range []string{"authority_role", "authority", "emergency_authority", "module", "version", "commit", "go_version"} {
+	for _, name := range []string{"authority_role", "authority", "emergency_authority", "module", "version", "commit", "go_version", "slot"} {
 		_, found := seen[name]
 		require.True(t, found, "no exported series carries the label %q, so this test did not look at it", name)
 	}
