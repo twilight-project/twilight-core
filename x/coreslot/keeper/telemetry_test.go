@@ -32,6 +32,7 @@ func TestTelemetrySnapshotCountsTheValidatorSetState(t *testing.T) {
 		EmergencyNominationPending: true,
 		Authority:                  authority,
 		EmergencyAuthority:         emergency,
+		ActiveSlotIDs:              []uint64{1, 2, 3},
 	}, snap)
 }
 

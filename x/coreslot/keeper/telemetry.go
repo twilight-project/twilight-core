@@ -36,6 +36,11 @@ type TelemetrySnapshot struct {
 	// that cannot be missed (#200).
 	Authority          string
 	EmergencyAuthority string
+	// ActiveSlotIDs are the slot ids currently ACTIVE. The app uses them to key
+	// per-slot settlement telemetry without an unbounded scan of the mining
+	// module's settlement rows; it is read from the same active-slot index the
+	// count above comes from, bounded by HardMaxActiveCoreSlots.
+	ActiveSlotIDs []uint64
 }
 
 // TelemetrySnapshot reads the validator-set state. A read failure is returned
@@ -71,6 +76,13 @@ func (k Keeper) TelemetrySnapshot(ctx context.Context) (TelemetrySnapshot, error
 	}
 	snap.EmergencyNominationPending, err = k.PendingAuthority.Has(ctx, int32(types.AuthorityRole_AUTHORITY_ROLE_EMERGENCY))
 	if err != nil {
+		return TelemetrySnapshot{}, err
+	}
+
+	if err := k.ActiveSlots.Walk(ctx, nil, func(id uint64) (bool, error) {
+		snap.ActiveSlotIDs = append(snap.ActiveSlotIDs, id)
+		return false, nil
+	}); err != nil {
 		return TelemetrySnapshot{}, err
 	}
 	return snap, nil

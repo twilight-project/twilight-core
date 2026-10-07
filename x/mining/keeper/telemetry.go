@@ -2,6 +2,10 @@ package keeper
 
 import (
 	"context"
+
+	"cosmossdk.io/collections"
+
+	"github.com/twilight-project/twilight-core/x/mining/types"
 )
 
 // TelemetrySnapshot is the module's consensus clock state as plain values, for
@@ -43,4 +47,49 @@ func (k Keeper) TelemetrySnapshot(ctx context.Context) (TelemetrySnapshot, error
 		return TelemetrySnapshot{}, err
 	}
 	return TelemetrySnapshot{SettlementClock: clock, LastProcessedRewardEpoch: cursor}, nil
+}
+
+// SlotSettlement is the latest settlement row for one slot: the greatest epoch
+// that has a settlement, and that settlement's outcome. Found is false when the
+// slot has no settlement row yet.
+type SlotSettlement struct {
+	SlotID             uint64
+	Epoch              uint64
+	Finalized          bool
+	FinalizationReason string
+	Found              bool
+}
+
+// LastSlotSettlement returns the greatest-epoch settlement row for slotID. It is
+// read with a descending range limited to the first row, so the cost is one
+// decode per slot however many epochs that slot has settled — never a walk of
+// the slot's history. The app calls it once per ACTIVE slot (coreslot's bounded
+// set), so the per-slot settlement export stays bounded by the active-slot count,
+// the same discipline this module's TelemetrySnapshot keeps.
+//
+// The outcome is the row's own Finalized flag and FinalizationReason; the latest
+// row may itself be open (not yet finalized), which is the true state to report
+// rather than scanning back for the last finalized one (that scan is the
+// unbounded read the bound exists to avoid).
+func (k Keeper) LastSlotSettlement(ctx context.Context, slotID uint64) (SlotSettlement, error) {
+	rng := collections.NewPrefixedPairRange[uint64, uint64](slotID).Descending()
+	iter, err := k.Settlements.Iterate(ctx, rng)
+	if err != nil {
+		return SlotSettlement{}, err
+	}
+	defer iter.Close()
+	if !iter.Valid() {
+		return SlotSettlement{SlotID: slotID}, nil
+	}
+	s, err := iter.Value()
+	if err != nil {
+		return SlotSettlement{}, err
+	}
+	return SlotSettlement{
+		SlotID:             slotID,
+		Epoch:              s.Epoch,
+		Finalized:          s.Finalized,
+		FinalizationReason: types.SettlementFinalizationReason_name[int32(s.FinalizationReason)],
+		Found:              true,
+	}, nil
 }

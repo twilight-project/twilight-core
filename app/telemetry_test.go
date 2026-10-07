@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,36 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		`twilight_coreslot_authority_info{authority="` + csParams.Authority + `",emergency_authority="` + csParams.EmergencyAuthority + `"}`: 1,
 		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`:                              1,
 	}
+
+	// The per-slot settlement export is keyed by coreslot's ACTIVE slots and
+	// reads each slot's latest row from the mining module — the same two sources
+	// the app wires together. Documenting it from those sources rather than from
+	// literals keeps the contract honest: if a slot has no settlement row the app
+	// emits nothing, and so must this map.
+	csSnap, err := chain.app.CoreSlotKeeper.TelemetrySnapshot(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, csSnap.ActiveSlotIDs, "no active slot to settle, so the per-slot export is untested")
+	settledSlots := 0
+	for _, slotID := range csSnap.ActiveSlotIDs {
+		ss, err := chain.app.MiningKeeper.LastSlotSettlement(ctx, slotID)
+		require.NoError(t, err)
+		if !ss.Found {
+			continue
+		}
+		settledSlots++
+		slot := strconv.FormatUint(slotID, 10)
+		expected[`twilight_mining_slot_last_settlement_epoch{slot="`+slot+`"}`] = float64(ss.Epoch)
+		finalized := 0.0
+		if ss.Finalized {
+			finalized = 1
+		}
+		expected[`twilight_mining_slot_last_settlement_finalized{slot="`+slot+`"}`] = finalized
+		expected[`twilight_mining_slot_last_settlement_info{reason="`+ss.FinalizationReason+`",slot="`+slot+`"}`] = 1
+	}
+	// A slot that has settled at least once is what makes the export observable;
+	// the scenario commits two full epochs, so some active slot must carry a row.
+	require.NotZero(t, settledSlots, "no active slot exported a settlement row, so the per-slot export is untested")
+
 	for name, want := range expected {
 		got, found := values[name]
 		require.True(t, found, "metric %s is not exported", name)

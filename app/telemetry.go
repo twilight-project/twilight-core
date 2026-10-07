@@ -3,6 +3,7 @@ package app
 import (
 	"math/big"
 	goruntime "runtime"
+	"strconv"
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -116,6 +117,10 @@ func (a *App) emitTelemetry() {
 		a.reportTelemetryReadFailure(coreslottypes.ModuleName, err)
 	} else {
 		emitCoreSlotTelemetry(snap)
+		// Per-slot settlement joins coreslot (which slots are active) with mining
+		// (each slot's latest settlement). The slot set is coreslot's, so it is
+		// emitted here, where that set is in hand.
+		a.emitSlotSettlements(ctx, snap.ActiveSlotIDs)
 	}
 	if snap, err := a.RewardsKeeper.TelemetrySnapshot(ctx); err != nil {
 		a.reportTelemetryReadFailure(rewardstypes.ModuleName, err)
@@ -225,6 +230,38 @@ func emitRewardsTelemetry(snap rewardskeeper.TelemetrySnapshot) {
 	setGauge(module, "paused", boolGauge(snap.Paused))
 	setGauge(module, "pause_transition_pending", boolGauge(snap.PauseTransitionPending))
 	setGauge(module, "release_enabled", boolGauge(snap.ReleaseEnabled))
+}
+
+// emitSlotSettlements exports, per ACTIVE slot, that slot's latest settlement
+// epoch and outcome — the per-slot settlement view that until now lived only in
+// the logs. The slot set is coreslot's active slots (bounded), and each read is a
+// single descending row from the mining module (LastSlotSettlement), so the whole
+// export is bounded by the active-slot count. A per-slot read failure skips that
+// slot and is counted, like every other module read here; it runs through the
+// same committed-store cache and writes nothing.
+func (a *App) emitSlotSettlements(ctx sdk.Context, activeSlotIDs []uint64) {
+	for _, slotID := range activeSlotIDs {
+		ss, err := a.MiningKeeper.LastSlotSettlement(ctx, slotID)
+		if err != nil {
+			a.reportTelemetryReadFailure(miningtypes.ModuleName, err)
+			continue
+		}
+		if !ss.Found {
+			// No settlement for this slot yet: emit no series rather than a fake
+			// epoch 0, which would read as "settled epoch 0".
+			continue
+		}
+		slot := []metrics.Label{telemetry.NewLabel("slot", strconv.FormatUint(ss.SlotID, 10))}
+		telemetry.SetGaugeWithLabels(
+			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_epoch"},
+			float32(ss.Epoch), slot)
+		telemetry.SetGaugeWithLabels(
+			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_finalized"},
+			boolGauge(ss.Finalized), slot)
+		telemetry.SetGaugeWithLabels(
+			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_info"},
+			1, append(slot, telemetry.NewLabel("reason", ss.FinalizationReason)))
+	}
 }
 
 func emitMiningTelemetry(snap miningkeeper.TelemetrySnapshot) {
