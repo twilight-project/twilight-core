@@ -103,7 +103,7 @@ twilightd export --home <node-home> --output-document state.json
 
 This exports the full app state via the module manager's export path, every module in
 the same shape as genesis ([Genesis Reference](../reference/genesis-reference.md)).
-Beyond what a fresh genesis holds, an export of a running chain carries:
+Beyond what a launch genesis holds, an export of a running chain carries:
 
 - `rewards`: the finalized epoch aggregates, every slot entitlement with its released
   amount, the outstanding entitlement liability, the pause state, the open epoch's
@@ -113,38 +113,21 @@ Beyond what a fresh genesis holds, an export of a running chain carries:
 - `coreslot`: the slots with their lifecycle state, reserved consensus addresses, the
   last-applied validator set, pending key rotations and pending authority transfers.
 
-## What must round-trip
+## An export cannot be re-imported by this binary
 
-A re-import (`InitChain` from exported state) must preserve, exactly:
+The export is **complete**: every monetary fact of the chain — the finalized-epoch
+archive, every entitlement, the liability, the supply, the escrow — is in it, and a test
+asserts exactly that. But every module's importer accepts only a **fresh** genesis, and
+refuses a document that carries closed-epoch state, naming it. A continuation importer,
+one that restarts a chain from an export of a running chain, is deferred, not written.
+So an export is a record for review and for a future continuation path, not a restore
+procedure; a node recovers from its own data directory and backups, and an upgrade
+continues the existing state in place.
 
-- rewards params and state (cumulative emitted, carry, current epoch);
-- the current epoch config;
-- every finalized epoch aggregate, every outstanding slot entitlement, and the
-  outstanding entitlement liability;
-- the `rewards` module account balance and total `utwlt` supply.
+What is tested on the genesis path is narrower: a populated genesis document (non-default
+state and a queued params update, no closed epoch) round-trips through the app's module
+manager byte-for-byte and re-imports into a fresh app with its state preserved.
 
-## What export/import covers
-
-A full app-level export/import test finalizes an epoch, exports via
-`App.ExportAppStateAndValidators`, `InitChain`s a **fresh app** from the exported
-state, **continues a block**, and asserts the rewards params, state, cumulative
-emitted, finalized epoch, slot entitlement, module balance, native supply, and
-continued active-block accounting are all preserved — with no panic.
-
-This exercises the full app / module-manager export/import path, not a keeper-only
-genesis round trip.
-
-## Verify after import
-
-```bash
-twilightd rewards-query cumulative-emitted --node <rpc>   # matches pre-export
-twilightd rewards-query module-balances --node <rpc>      # matches pre-export
-twilightd rewards-query epoch-reward <finalized-epoch> --node <rpc>
-```
-
-Then advance one block and confirm the chain continues to finalize epochs
-coherently.
-
-Export and restore is the disaster path, not the upgrade path: it is what remains when a
-network cannot resume. Any upgrade or restore must preserve the immutable `native_denom`
-and `max_supply` and the finalized epoch and entitlement history.
+Any upgrade must preserve the immutable `native_denom` and `max_supply` and the
+finalized epoch and entitlement history; a future continuation importer must preserve
+them exactly as the export records them.

@@ -4,19 +4,22 @@ title: Module Accounts
 
 # Module Accounts
 
-The chain has **five** module accounts, declared once in `app/config.go` and created by
-`auth` at genesis. The same declaration feeds the economic-address rule, so a module
-account is always **refused as a payee**: a participant payout, a settlement address or
-a treasury address naming one is rejected (`mining-query validate-economic-address`
-reports why).
+The chain has **five** module accounts, declared once in `app/config.go`. `auth` creates
+`fee_collector` at genesis; every other module account is created on first use
+(`rewards` at its first mint), and `coreslot-authority`, `coreslot-emergency` and
+`rewards_fee_pool` may never exist in state at all. Their addresses are fixed either way,
+and the same declaration feeds the economic-address rule, which needs no account to
+exist: a module account is always **refused as a payee** — a participant payout, a
+settlement address or a treasury address naming one is rejected
+(`mining-query validate-economic-address` reports why).
 
 | Account | Permission | Holds | Used by |
 |---|---|---|---|
 | `rewards` | `Minter` | minted epoch emission; every unreleased entitlement and the carry-forward remainder | the only minter: mints at finalization; sends on settlement release and on the treasury share |
 | `rewards_fee_pool` | _(none)_ | nothing while fees are disabled | reserved for future fee plumbing; dormant |
-| `fee_collector` | _(none)_ | nothing: the chain charges no fees | the SDK's standard fee destination, present because `auth` requires it |
-| `coreslot-authority` | _(none)_ | nothing; no key exists for it | the authority the SDK modules (`auth`, `bank`, `consensus`, `upgrade`) are bound to, so none of their own authority messages can be signed; CoreSlot's `ScheduleUpgrade`/`CancelUpgrade` is the only path to `x/upgrade`. Also what `twilightd init` writes as both CoreSlot authorities until a launch sets real ones |
-| `coreslot-emergency` | _(none)_ | nothing; no key exists for it | the placeholder `twilightd init` writes as the emergency authority |
+| `fee_collector` | _(none)_ | any fee a sender chooses to attach; the chain requires none (validators' default minimum gas price is `0utwlt`) and nothing pays out of it | the SDK's standard fee destination, present because `auth` requires it |
+| `coreslot-authority` | _(none)_ | nothing; no key exists for it | the authority the SDK modules (`auth`, `bank`, `consensus`, `upgrade`) are bound to, so none of their own authority messages can be signed; CoreSlot's `ScheduleUpgrade`/`CancelUpgrade` is the only path to `x/upgrade`. Also what `twilightd init` writes as the CoreSlot `authority` until a launch sets a real one |
+| `coreslot-emergency` | _(none)_ | nothing; no key exists for it | the placeholder `twilightd init` writes as the CoreSlot `emergency_authority` |
 
 No account has `Burner` or `Staking` permissions, and no staking, distribution, slashing
 or governance module accounts exist.
@@ -37,10 +40,13 @@ that uses the `twilight` bech32 prefix:
 Read them from a node rather than trusting a table:
 
 ```bash
-twilightd query auth module-accounts --node <rpc> --output json
+twilightd query auth module-accounts --node <rpc>
+# lists all five with their addresses and permissions, including accounts that
+# have never been created in state; `query auth account <address>` answers
+# "not found" for one of those
 twilightd rewards-query module-balances --node <rpc>
-# { "denom": "utwlt", "rewards_balance": "...", "fee_pool_balance": "0",
-#   "outstanding_entitlement_liability": "...", "carry_forward_remainder": "..." }
+# denom, rewards_balance, fee_pool_balance, outstanding_entitlement_liability,
+# carry_forward_remainder
 ```
 
 ## The `rewards` account is the escrow

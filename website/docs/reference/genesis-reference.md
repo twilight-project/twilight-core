@@ -9,55 +9,68 @@ genesis must satisfy, and how a launch genesis is built and checked. For the mod
 initialization order see [Chain → Genesis](../chain/genesis.md).
 
 `twilightd init` writes an `app_state` with six sections: `auth`, `bank`, `upgrade`
-(empty), and the three Twilight modules below. `consensus` has no genesis section.
+(empty), and the three Twilight modules below. `consensus` has no `app_state` section;
+the consensus parameters, including `block.max_gas`, are the file's top-level
+`consensus.params`.
+
+The "Validate" column is what the module's own genesis validation enforces on a fresh
+genesis. `make check-genesis` (below) requires more of a launch file; those extra
+requirements are listed after the tables.
 
 ## `coreslot`
 
-| Field | Type | Fresh genesis |
+| Field | Type | Validate |
 |---|---|---|
-| `params` | `Params` | See [Parameters → CoreSlot](../rewards/params.md#coreslot). `twilightd init` writes the keyless `coreslot-authority` and `coreslot-emergency` module accounts as both authorities; a launch must replace them (below) |
+| `params` | `Params` | See [Parameters → CoreSlot](../rewards/params.md#coreslot). `twilightd init` writes the keyless `coreslot-authority` module account as `authority` and `coreslot-emergency` as `emergency_authority`; a launch replaces both (below) |
 | `slots` | `CoreSlot[]` | Only `PENDING` or `ACTIVE`; the ACTIVE count must lie within `[min_active_slots, max_active_slots]`, so a launch needs at least `min_active_slots` active slots |
 | `next_slot_id` | uint64 | Must exceed the highest slot id present |
-| `reward_weights` | `OperatorRewardWeight[]` | One per slot (metadata; not read by rewards) |
-| `selection_policies` | `SelectionPolicyVersion[]` | One version per slot |
+| `reward_weights` | `OperatorRewardWeight[]` | Each must name an existing slot; `coreslot-genesis add` writes one per slot (metadata; not read by rewards) |
+| `selection_policies` | `SelectionPolicyVersion[]` | One version per slot, written by `coreslot-genesis add` |
 | `pending_key_rotations` | `PendingKeyRotation[]` | Must be empty |
-| `reserved_consensus_addresses` | `ReservedConsensusAddress[]` | Consensus keys under the reuse lockout |
-| `last_applied_validators` | `LastAppliedValidator[]` | The validator set as last emitted |
-| `pending_authority_transfers` | `PendingAuthorityTransferEntry[]` | Nominations in flight, by role |
+| `reserved_consensus_addresses` | `ReservedConsensusAddress[]` | Consensus keys under the reuse lockout; accepted |
+| `last_applied_validators` | `LastAppliedValidator[]` | The validator set as last emitted; accepted |
+| `pending_authority_transfers` | `PendingAuthorityTransferEntry[]` | Nominations in flight, by role; accepted |
 
 ## `rewards`
 
-| Field | Type | Fresh genesis |
+| Field | Type | Validate |
 |---|---|---|
 | `params` | `Params` | See [Parameters → Rewards](../rewards/params.md#rewards); `native_denom` must be `utwlt` |
-| `state` | `RewardsState` | `current_epoch = 1`, `current_epoch_start_height = 1`, `cumulative_emitted = "0"`, `carry_forward_remainder = "0"` |
+| `state` | `RewardsState` | `current_epoch = 1` and `current_epoch_start_height = 1`; `cumulative_emitted` and `carry_forward_remainder` must parse as integers, with `cumulative_emitted ≤ max_supply` |
 | `current_epoch_config` | `EpochConfigSnapshot` | The open epoch's frozen configuration (mirrors version 1 below) |
 | `epoch_config_versions` | `EpochConfigVersion[]` | Exactly one, version 1 effective from epoch 1: the epoch length (360 to 720) |
 | `scheduled_epoch_configs` | `ScheduledEpochConfig[]` | Must be empty |
 | `reward_config_versions` | `RewardConfigVersion[]` | Exactly one, version 1 effective from epoch 1: the subsidy, treasury share (at most 5000 bps) and treasury address |
 | `scheduled_reward_configs` | `ScheduledRewardConfig[]` | Must be empty |
-| `pause_state` | `RewardsPauseState` | `current_paused`, and no pending transition |
+| `pause_state` | `RewardsPauseState` | No pending transition; `current_paused` is accepted either way |
 | `open_reward_enabled_blocks` | uint64 | Must be 0 |
-| `has_pending_params`, `pending_params` | bool, `Params` | A queued params update, if any |
+| `has_pending_params`, `pending_params` | bool, `Params` | A queued params update; accepted |
 | `finalized_epochs` | `EpochReward[]` | Must be empty |
 | `slot_entitlements` | `SlotEntitlement[]` | Must be empty |
 | `outstanding_entitlement_liability` | string (int) | Must be `"0"` |
 
-`cumulative_emitted` can never exceed `max_supply`, and the default genesis has no
-premine: total supply starts at zero and rises only through emission.
+The default genesis has no premine: `cumulative_emitted` is `"0"` and total supply rises
+only through emission.
 
 ## `mining`
 
-| Field | Type | Fresh genesis |
+| Field | Type | Validate |
 |---|---|---|
 | `distribution_mode_versions` | `MiningDistributionModeVersion[]` | Exactly one, version 1 valid from epoch 1 with no end: `MINING_DISTRIBUTION_MODE_TRUSTED_AS_DISTRIBUTION` |
 | `settlement_params_versions` | `SettlementParamsVersion[]` | Exactly one, version 1 effective from epoch 1: see [Settlement → Parameters](../rewards/settlement.md#parameters) |
-| `selection_params_versions` | `SelectionParamsVersion[]` | Exactly one, version 1 (for the protocol-selection mode, which has no producer in this version) |
+| `selection_params_versions` | `SelectionParamsVersion[]` | Exactly one, version 1. No selection runs in this version, but InitChain checks every ACTIVE slot's selection policy against it (rate at most `max_selection_rate_bps`, selected participants at most `max_selected_participants_per_selection`) |
 | `scheduled_distribution_modes`, `scheduled_settlement_params`, `scheduled_selection_params` | lists | Must be empty |
 | `settlement_clock` | uint64 | Must be 0 (counts settlement-enabled blocks, not a height) |
 | `last_processed_reward_epoch` | uint64 | Must be 0 |
 | `settlement_epoch_anchors` | `SettlementEpochAnchor[]` | Must be empty |
 | `settlements` | `Settlement[]` | Must be empty |
+
+## What `make check-genesis` requires beyond `Validate`
+
+A launch file must also have `cumulative_emitted` and `carry_forward_remainder` of
+`"0"`, `has_pending_params` false, `current_paused` false, and empty
+`pending_authority_transfers` and `reserved_consensus_addresses`. The chain accepts each
+of those non-empty; a launch does not want them.
 
 ## Building a launch genesis
 
@@ -80,7 +93,9 @@ twilightd add-genesis-account <authority> <amount>utwlt --home <home>
 # its selection policy, and advances next_slot_id
 twilightd coreslot-genesis add <operator> <payout> <settlement> <consensus-pubkey-base64> <moniker> --home <home>
 
-# the module's own genesis validation, plus "at least one ACTIVE slot"
+# the module's own genesis validation (which already needs min_active_slots ACTIVE
+# slots), plus: activation heights and policies pinned to the file's initial_height,
+# and any CometBFT validator list the file states must match the ACTIVE slots
 twilightd coreslot-genesis validate --home <home>
 ```
 
@@ -97,23 +112,28 @@ GC_AUTHORITY=<address> GC_EMERGENCY_AUTHORITY=<address> \
   make check-genesis GENESIS=path/to/genesis.json
 ```
 
-It runs seven layers, deliberately separate: the document shape; the chain's own
-validators (authoritative, including `coreslot-genesis validate`); the fresh-genesis
-invariants above; the consistency of the `params` mirrors with version 1 of each history
-and the epoch snapshot; the immutable bounds from `app/params/bounds.go`; known traps;
-and the **launch decisions**, which must be supplied (`GC_*`) rather than inferred — a
-file checked against itself proves nothing, and a default left in place is not a
-decision. Optional decisions cover the denom, max supply, subsidy, epoch length, treasury
-share and address, block time and `allow_emergency_below_min_active`. With the binary it
-also starts a throwaway node against the file until InitChain has run, which is the only
-check that asks every module's `InitGenesis` rather than predicting it. It ends with an
-emission projection that is informational, not a genesis value.
+It runs eight numbered sections in three layers that are deliberately kept apart: the
+chain's own validation (authoritative, including `coreslot-genesis validate`), rules
+true of any correct launch file (the invariants above, the consistency of the `params`
+mirrors with version 1 of each history and the epoch snapshot, the immutable bounds from
+`app/params/bounds.go`, known traps), and the **launch decisions**, which must be
+supplied as `GC_*` rather than inferred — a file checked against itself proves nothing,
+and a default left in place is not a decision. The seven variables shown are required.
+The remaining `GC_*` variables (max supply, subsidy, epoch length, treasury share and
+address, block time, `allow_emergency_below_min_active`) are shipped-default
+expectations: leave one out and the file must equal the shipped default for it. With
+the binary it also starts a throwaway node against the file until InitChain has run,
+which is the only check that asks every module's `InitGenesis` rather than predicting
+it. It ends with an emission projection that is informational, not a genesis value.
 
 ## Exported state
 
-`twilightd export` writes every module's state in the same shape, so an export of a
-running chain carries what a fresh genesis forbids: finalized epochs, slot entitlements,
-a non-zero liability and open-reward-enabled block count, settlements and their anchors, a
-non-zero settlement clock and cursor, pending key rotations and authority transfers.
-What a re-import must preserve is on
+`twilightd export` writes every module's state in the same shape as genesis, and it is
+complete: every monetary fact of the chain is in it. But **this binary cannot re-import
+an export of a running chain** — every module's importer accepts only a fresh genesis,
+and a continuation importer is deferred. An export is a record, not a restore path. It
+carries what a launch file must not: finalized epochs, slot entitlements, a non-zero
+liability and open-reward-enabled block count, settlements and their anchors, a non-zero
+settlement clock and cursor, pending key rotations; and pending authority transfers,
+which `Validate` accepts but `make check-genesis` refuses. See
 [Upgrade & Export/Import](../operators/upgrade-and-export-import.md#exporting-state).
