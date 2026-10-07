@@ -43,8 +43,13 @@ the blocks before the pause counted.
 6. Write the immutable epoch aggregate and one slot entitlement per eligible slot.
 7. Set `carry_forward_remainder = carryOut`; update `cumulative_emitted`.
 8. Delete the closed epoch's active-block rows.
-9. Advance: `current_epoch += 1`, `current_epoch_start_height = end + 1`.
-10. Activate pending params (if any) and build the next epoch config snapshot.
+9. Promote any reward configuration scheduled for the next epoch.
+
+The epoch counter does **not** advance here: the next epoch becomes current at its
+own first BeginBlock, with `current_epoch_start_height = end + 1`. A query at the
+closing height therefore sees `last_finalized_epoch == current_epoch`. In the same
+block, `x/mining` materializes the closed epoch's settlement set — see
+[Settlement](settlement.md).
 
 ## Pause interactions
 

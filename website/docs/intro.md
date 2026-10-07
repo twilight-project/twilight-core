@@ -36,8 +36,14 @@ only** (6 decimals) and never appear in accounting state.
   participation allocation, epoch finalization, carry-forward remainder
   accounting, slot entitlements, queued parameter updates, and emergency
   pause/resume.
-- **Query and transaction surfaces** — CLI and gRPC/query interfaces for reading
-  rewards state and submitting supported rewards transactions.
+- **Settlement** (`x/mining`) — the release of each slot's entitlement: a
+  block-driven settlement clock, a settlement set materialized when an epoch
+  closes, participant payouts by chunk, and finalization that returns the
+  remainder to the snapshotted payout address. Holds no funds of its own.
+- **On-chain upgrades** (`x/upgrade`) — scheduled only by the CoreSlot authority;
+  a coordinated halt at a height, then the registered handler.
+- **Query and transaction surfaces** — CLI, gRPC and REST interfaces for reading
+  chain state and submitting the supported transactions.
 
 ## Start here
 

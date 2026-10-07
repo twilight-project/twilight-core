@@ -14,12 +14,15 @@ total supply rising only through epoch emission. See
 `InitGenesis` runs in this order (set in `app/config.go`):
 
 ```text
-auth → bank → consensus → coreslot → rewards
+upgrade → auth → bank → consensus → coreslot → rewards → mining
 ```
 
-`auth` and `bank` initialize first so module accounts exist before rewards
-genesis runs. CoreSlot precedes rewards. Rewards `InitGenesis` does **not** mint
-or send — it only writes state.
+`upgrade` goes first; it carries no state in the genesis file and only records each
+module's consensus version, which a later upgrade handler migrates from. `auth` and
+`bank` initialize next so module accounts exist before rewards genesis runs. CoreSlot precedes rewards, and mining comes last: it is the consumer of both
+custom modules. Neither rewards nor mining `InitGenesis` mints or sends — they only
+write state; mining also rebuilds its derived indexes (the open-settlement index and
+the version indexes) from the rows it imported rather than importing them.
 
 ## Module accounts created at genesis
 
@@ -47,13 +50,30 @@ balances. Total supply begins at zero and rises only through emission.
 The full schema and a sample JSON are in
 [Genesis Reference](../reference/genesis-reference.md).
 
+## Mining default genesis
+
+Fresh default mining genesis (from `x/mining/types/genesis.go`) describes a
+trusted-distribution chain whose first epoch is 1:
+
+- one version in each history, effective from epoch 1: the distribution mode
+  (`TRUSTED_AS_DISTRIBUTION`), the settlement parameters (window 2 epochs, 32
+  recipients per chunk, 4 chunks per settlement, minimum payout `10000utwlt`), and
+  the selection parameters;
+- no scheduled changes;
+- `settlement_clock = 0` and `last_processed_reward_epoch = 0` — both are required
+  to be zero on a fresh genesis;
+- no settlement epoch anchors and no settlements.
+
+See [Settlement](../rewards/settlement.md) for what each of these governs.
+
 ## Inspecting genesis
 
 ```bash
 twilightd init <moniker> --chain-id <chain-id>
-# the generated genesis includes the rewards default genesis,
-# because rewards is registered in the CLI basic manager.
+# the generated genesis includes the default genesis of every wired module
+jq '.app_state.coreslot' ~/.twilightd/config/genesis.json
 jq '.app_state.rewards' ~/.twilightd/config/genesis.json
+jq '.app_state.mining' ~/.twilightd/config/genesis.json
 ```
 
 ## Localnet fixtures (not production)

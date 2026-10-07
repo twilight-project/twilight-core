@@ -5,9 +5,9 @@ title: Consensus & CoreSlot
 # Consensus & CoreSlot
 
 Twilight uses Cosmos SDK `v0.53.7` and CometBFT `v0.38.x`. The runtime app
-includes `auth`, `bank`, `consensus` params, `tx`, `x/coreslot`, and `x/rewards`.
-It deliberately omits `staking`, `distribution`, `slashing`, `mint`, and
-`governance`.
+includes `auth`, `bank`, `consensus` params, `tx`, `upgrade`, `x/coreslot`,
+`x/rewards`, and `x/mining`. It deliberately omits `staking`, `distribution`,
+`slashing`, `mint`, and `governance`.
 
 ## Validator ownership
 
