@@ -24,7 +24,7 @@ standard Cosmos tx flags.
 
 Queues a full `Params` update from a JSON file. The update is **queued** in
 `PendingParams` and activates at the **next epoch boundary**; the current epoch
-settles under its existing snapshot.
+finalizes under its existing configuration.
 
 ```bash
 twilightd rewards update-params ./params.json --from <authority> \
@@ -35,15 +35,19 @@ The simplest way to produce a valid `params.json` is to query the current params
 and edit it:
 
 ```bash
-twilightd rewards-query params --node <rpc> --output json > params.json
-# edit mutable fields, then submit
+# the query wraps the record in {"params": …}; update-params takes the bare record
+twilightd rewards-query params --node <rpc> --output json | jq .params > params.json
+# only target_block_time_seconds and max_claim_epochs_per_tx may differ, then submit
 ```
 
-:::warning Immutable fields
-`native_denom` and `max_supply` are **immutable** after genesis. The keeper
-rejects any update that changes them, and rejects enabling unsupported v1
-features (weighted rewards, fee collection/distribution, non-`NONE` fee mode,
-distribution methods other than `DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS`). Do not attempt to change the denom or cap via params.
+:::warning Almost every field must keep its value
+Only `target_block_time_seconds` (informational) and the deprecated
+`max_claim_epochs_per_tx` may change. The denom and cap are immutable; the subsidy,
+treasury share, treasury address and epoch length are governed by versioned histories
+that no transaction writes; the halving mode, distribution method, remainder policy
+and fee treasury share are genesis-fixed; the three deprecated enable flags carry no
+authority; and enabling fees or weighted rewards is rejected by validation. The full
+table is on [Parameters](params.md#rewards).
 :::
 
 See [Parameters](params.md) for the full field list and mutability.

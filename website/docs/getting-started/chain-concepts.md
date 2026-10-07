@@ -32,11 +32,17 @@ already-minted balance and never changes total supply.
 
 ## Two authorities
 
-- **Authority** (CoreSlot) — admits slots and queues rewards params updates
-  (activated at the next epoch boundary).
-- **Emergency authority** (CoreSlot) — can pause and resume rewards. There is one
-  canonical pause state, effective at the start of the next block; it stops accrual
-  and release together, but not epoch time.
+- **Authority** (CoreSlot) — decides the validator set (admits, activates, removes
+  and suspends slots), sets CoreSlot params, schedules on-chain upgrades, and can queue
+  a rewards params update (which today changes only informational fields).
+- **Emergency authority** (CoreSlot) — can pause and resume rewards, and suspend a
+  slot. There is one canonical pause state, effective at the start of the next block;
+  it stops accrual and release together, but not epoch time.
+
+Neither can mint directly, move value already escrowed, or change the chain's
+economics, which are fixed at genesis or held in versioned histories; the authority
+does decide who is in the validator set, and so who earns future emission. See
+[Security & Failure Modes](../rewards/security-and-failure-modes.md#authority-model).
 
 Neither can change the immutable `native_denom` or `max_supply`.
 

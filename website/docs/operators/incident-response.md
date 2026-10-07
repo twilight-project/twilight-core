@@ -99,7 +99,13 @@ critical accounting defect.
 
 ## Key compromise
 
-- **Emergency key:** can pause (DoS) only. Rotate via CoreSlot; resume any
-  unwanted pauses.
-- **Authority key:** can queue params at the next boundary only (not denom/cap,
-  not pause). Rotate via CoreSlot; re-queue correct params.
+- **Emergency key:** can pause (a denial of service) and suspend slots. Rotate the
+  role (nominate a fresh key and accept, ideally in one block); resume any unwanted
+  pause; reactivate any slot it suspended.
+- **Authority key:** can change the validator set — and with it who earns future
+  emission — change CoreSlot params, and schedule an upgrade at a height; it cannot
+  move value already escrowed, and a rewards params update changes only informational
+  fields. Rotate the role the same way; cancel any plan you did not schedule
+  (`coreslot cancel-upgrade`); review the slot set and reverse admissions you did not
+  make. See
+  [what each key controls](../rewards/security-and-failure-modes.md#what-each-key-controls-and-what-to-do-if-it-is-lost).

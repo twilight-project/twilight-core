@@ -12,7 +12,7 @@ how genesis is initialized and a non-reference overview, see
 
 | Field | Type | Notes |
 |---|---|---|
-| `params` | `Params` | Rewards parameters ([reference](params-reference.md)) |
+| `params` | `Params` | Rewards parameters ([Parameters](../rewards/params.md)) |
 | `state` | `RewardsState` | Current epoch counters |
 | `current_epoch_config` | `EpochConfigSnapshot` | The open epoch's frozen config |
 | `pending_params` | `Params` | Present only if a params update is queued |
@@ -67,7 +67,7 @@ jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 - no duplicate finalized epoch;
 - a fresh genesis carries no finalized epochs, no slot entitlements, and an
   outstanding entitlement liability of exactly `"0"`;
-- standard `Params` validation ([params reference](params-reference.md)).
+- standard `Params` validation ([Parameters](../rewards/params.md#what-update-params-rejects)).
 
 No premine: default rewards genesis has `cumulative_emitted = 0` and no rewards
 balances. Localnet fixtures that fund accounts are development-only.
