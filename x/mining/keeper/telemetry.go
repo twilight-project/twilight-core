@@ -20,7 +20,9 @@ import (
 // size is unbounded precisely when settlements go unsealed — which is the failure
 // the metric would be watching for. A walk that grows with the outage it detects
 // is not a monitoring path; a maintained counter would be a consensus-state
-// change and belongs in its own review.
+// change and belongs in its own review. The per-slot backlog is read instead from
+// the FIRST entry of each slot's prefix (SlotSettlementState), which costs the
+// same whatever the backlog's size.
 type TelemetrySnapshot struct {
 	// SettlementClock is the canonical monotonic settlement clock. It ticks once
 	// per block whose beginning-of-block pause state permits release, so it lags
@@ -49,47 +51,78 @@ func (k Keeper) TelemetrySnapshot(ctx context.Context) (TelemetrySnapshot, error
 	return TelemetrySnapshot{SettlementClock: clock, LastProcessedRewardEpoch: cursor}, nil
 }
 
-// SlotSettlement is the latest settlement row for one slot: the greatest epoch
-// that has a settlement, and that settlement's outcome. Found is false when the
-// slot has no settlement row yet.
-type SlotSettlement struct {
-	SlotID             uint64
-	Epoch              uint64
-	Finalized          bool
-	FinalizationReason string
-	Found              bool
+// SlotSettlementState is one slot's settlement backlog as plain values: its
+// oldest OPEN settlement, and whether that settlement's participant deadline has
+// passed.
+//
+// The oldest open row is the one that matters. A slot can seal every new epoch on
+// time and still owe an older one, and the newest row is open by construction for
+// most of every epoch, so neither the latest row nor any fixed epoch offset from
+// the cursor answers "is this slot behind".
+type SlotSettlementState struct {
+	SlotID uint64
+	// OldestOpenEpoch is the epoch of the slot's oldest open settlement, or 0 when
+	// the slot has none. Epochs start at 1, so 0 is never a real epoch.
+	OldestOpenEpoch uint64
+	// Overdue reports that the oldest open settlement is at or past its
+	// participant deadline on the settlement clock: the same predicate the
+	// Settlement query returns as permissionless_finalization_now. A pause freezes
+	// the clock, so a pause never makes a settlement overdue.
+	Overdue bool
 }
 
-// LastSlotSettlement returns the greatest-epoch settlement row for slotID. It is
-// read with a descending range limited to the first row, so the cost is one
-// decode per slot however many epochs that slot has settled — never a walk of
-// the slot's history. The app calls it once per ACTIVE slot (coreslot's bounded
-// set), so the per-slot settlement export stays bounded by the active-slot count,
-// the same discipline this module's TelemetrySnapshot keeps.
+// SlotSettlementState reads one slot's settlement backlog.
 //
-// The outcome is the row's own Finalized flag and FinalizationReason; the latest
-// row may itself be open (not yet finalized), which is the true state to report
-// rather than scanning back for the last finalized one (that scan is the
-// unbounded read the bound exists to avoid).
-func (k Keeper) LastSlotSettlement(ctx context.Context, slotID uint64) (SlotSettlement, error) {
-	rng := collections.NewPrefixedPairRange[uint64, uint64](slotID).Descending()
-	iter, err := k.Settlements.Iterate(ctx, rng)
+// Cost: the first entry of the slot's prefix in OpenSettlementsBySlot, one
+// canonical row, and the reads its deadline derives from, however many epochs the
+// slot has settled or left open. The app calls it once per ACTIVE slot, so the
+// export is bounded by the active set, as the rest of this snapshot is.
+//
+// The index only nominates the candidate; the canonical row decides. An index
+// entry with no row, or naming a row that is already finalized, means the two
+// have come apart and is returned as an error rather than exported as a value.
+// The index cannot prove absence: a lost entry would hide its row here, which is
+// why the Settlement and OpenSettlements queries remain the authority for what a
+// slot owes.
+func (k Keeper) SlotSettlementState(ctx context.Context, slotID uint64) (SlotSettlementState, error) {
+	state := SlotSettlementState{SlotID: slotID}
+
+	iter, err := k.OpenSettlementsBySlot.Iterate(ctx, collections.NewPrefixedPairRange[uint64, uint64](slotID))
 	if err != nil {
-		return SlotSettlement{}, err
+		return SlotSettlementState{}, err
 	}
 	defer iter.Close()
 	if !iter.Valid() {
-		return SlotSettlement{SlotID: slotID}, nil
+		return state, nil
 	}
-	s, err := iter.Value()
+	key, err := iter.Key()
 	if err != nil {
-		return SlotSettlement{}, err
+		return SlotSettlementState{}, err
 	}
-	return SlotSettlement{
-		SlotID:             slotID,
-		Epoch:              s.Epoch,
-		Finalized:          s.Finalized,
-		FinalizationReason: types.SettlementFinalizationReason_name[int32(s.FinalizationReason)],
-		Found:              true,
-	}, nil
+	epoch := key.K2()
+
+	settlement, found, err := k.GetSettlement(ctx, slotID, epoch)
+	if err != nil {
+		return SlotSettlementState{}, err
+	}
+	if !found {
+		return SlotSettlementState{}, types.ErrInvalidState.Wrapf(
+			"the open-settlement index lists slot %d in epoch %d, which has no settlement", slotID, epoch)
+	}
+	if settlement.Finalized {
+		return SlotSettlementState{}, types.ErrInvalidState.Wrapf(
+			"the open-settlement index lists slot %d in epoch %d, which is finalized", slotID, epoch)
+	}
+
+	deadline, err := k.SettlementDeadlineClock(ctx, settlement)
+	if err != nil {
+		return SlotSettlementState{}, err
+	}
+	clock, err := k.GetSettlementClock(ctx)
+	if err != nil {
+		return SlotSettlementState{}, err
+	}
+	state.OldestOpenEpoch = epoch
+	state.Overdue = clock >= deadline
+	return state, nil
 }

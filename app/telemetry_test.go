@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	goruntime "runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +24,8 @@ import (
 	"github.com/twilight-project/twilight-core/app"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	miningkeeper "github.com/twilight-project/twilight-core/x/mining/keeper"
+	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 )
 
 // The telemetry contract.
@@ -260,37 +261,13 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		`twilight_coreslot_pending_authority_nomination{authority_role="primary"}`:   0,
 		`twilight_coreslot_authority_info{authority="` + csParams.Authority + `",emergency_authority="` + csParams.EmergencyAuthority + `"}`: 1,
 		`twilightd_build_info{commit="unstamped",go_version="` + goruntime.Version() + `",version="unstamped"}`:                              1,
+		// Epoch 1 materialized one settlement for slot 1, still open and two
+		// blocks old, far inside its two-epoch window. The values that tell slot
+		// id from epoch, and an overdue settlement from a fresh one, are pinned in
+		// TestTelemetryReportsTheSlotSettlementBacklog.
+		`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`: 1,
+		`twilight_mining_slot_settlement_overdue{slot="1"}`:           0,
 	}
-
-	// The per-slot settlement export is keyed by coreslot's ACTIVE slots and
-	// reads each slot's latest row from the mining module — the same two sources
-	// the app wires together. Documenting it from those sources rather than from
-	// literals keeps the contract honest: if a slot has no settlement row the app
-	// emits nothing, and so must this map.
-	csSnap, err := chain.app.CoreSlotKeeper.TelemetrySnapshot(ctx)
-	require.NoError(t, err)
-	require.NotEmpty(t, csSnap.ActiveSlotIDs, "no active slot to settle, so the per-slot export is untested")
-	settledSlots := 0
-	for _, slotID := range csSnap.ActiveSlotIDs {
-		ss, err := chain.app.MiningKeeper.LastSlotSettlement(ctx, slotID)
-		require.NoError(t, err)
-		if !ss.Found {
-			continue
-		}
-		settledSlots++
-		slot := strconv.FormatUint(slotID, 10)
-		expected[`twilight_mining_slot_last_settlement_epoch{slot="`+slot+`"}`] = float64(ss.Epoch)
-		finalized := 0.0
-		if ss.Finalized {
-			finalized = 1
-		}
-		expected[`twilight_mining_slot_last_settlement_finalized{slot="`+slot+`"}`] = finalized
-		expected[`twilight_mining_slot_last_settlement_info{reason="`+ss.FinalizationReason+`",slot="`+slot+`"}`] = 1
-	}
-	// A slot that has settled at least once is what makes the export observable;
-	// the scenario commits two full epochs, so some active slot must carry a row.
-	require.NotZero(t, settledSlots, "no active slot exported a settlement row, so the per-slot export is untested")
-
 	for name, want := range expected {
 		got, found := values[name]
 		require.True(t, found, "metric %s is not exported", name)
@@ -309,6 +286,66 @@ func TestTelemetryExportsEveryDocumentedGauge(t *testing.T) {
 		_, documented := expected[name]
 		require.True(t, documented, "metric %s is exported but not documented", name)
 	}
+}
+
+// The per-slot settlement gauges on a real chain, with literal values. Slot 1
+// seals epoch 1 while epoch 2 stays open, so its backlog is epoch 2 (an epoch
+// that is not the slot id), and the backlog turns overdue at exactly epoch 2's
+// derived deadline and not one block earlier.
+func TestTelemetryReportsTheSlotSettlementBacklog(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	const (
+		oldest  = `twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`
+		overdue = `twilight_mining_slot_settlement_overdue{slot="1"}`
+	)
+	gauge := func(values map[string]float64, name string) float64 {
+		t.Helper()
+		value, found := values[name]
+		require.True(t, found, "metric %s is not exported", name)
+		return value
+	}
+
+	// Epochs 1 and 2 have both closed and materialized; neither is sealed.
+	chain.commitThrough(t, 2*epochLength+2)
+	values := gather()
+	require.Equal(t, float64(1), gauge(values, oldest))
+	require.Equal(t, float64(0), gauge(values, overdue))
+
+	// The settlement signer seals epoch 1 early; the next block commits it.
+	_, err := miningkeeper.NewMsgServer(chain.app.MiningKeeper).FinalizeSettlement(chain.headContext(),
+		&miningtypes.MsgFinalizeSettlement{Signer: chain.credential, SlotId: 1, Epoch: 1})
+	require.NoError(t, err)
+	chain.commitThrough(t, chain.head+1)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest), "epoch 1 is sealed, so the backlog is epoch 2")
+	require.Equal(t, float64(0), gauge(values, overdue))
+
+	// Epoch 2's deadline, read from the chain rather than restated here.
+	ctx := chain.headContext()
+	settlement, found, err := chain.app.MiningKeeper.GetSettlement(ctx, 1, 2)
+	require.NoError(t, err)
+	require.True(t, found)
+	deadline, err := chain.app.MiningKeeper.SettlementDeadlineClock(ctx, settlement)
+	require.NoError(t, err)
+	clock, err := chain.app.MiningKeeper.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Less(t, clock+1, deadline, "the scenario must start well before the deadline")
+
+	// One tick before the deadline, then the deadline itself. The clock ticks once
+	// per unpaused block, and nothing here pauses.
+	chain.commitThrough(t, chain.head+int64(deadline-1-clock))
+	clock, err = chain.app.MiningKeeper.GetSettlementClock(chain.headContext())
+	require.NoError(t, err)
+	require.Equal(t, deadline-1, clock)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest))
+	require.Equal(t, float64(0), gauge(values, overdue), "one tick before the deadline")
+
+	chain.commitThrough(t, chain.head+1)
+	values = gather()
+	require.Equal(t, float64(2), gauge(values, oldest), "later epochs opening do not move the backlog")
+	require.Equal(t, float64(1), gauge(values, overdue), "at the deadline")
 }
 
 // The authority addresses are exported as labels because the nomination gauge
@@ -387,7 +424,9 @@ var targetLabels = map[string]struct{}{
 func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
 	_, registry := enableTelemetryWithRegistry(t)
 	chain := bootPinnedChain(t)
-	chain.commitThrough(t, 2)
+	// Past the first epoch close, so the per-slot settlement series (and their
+	// slot label) exist to be checked.
+	chain.commitThrough(t, epochLength+2)
 	chain.app.CountTelemetryReadFailureForTest("rewards")
 
 	families, err := registry.Gather()
@@ -412,7 +451,7 @@ func TestTelemetryLabelsDoNotCollideWithTargetLabels(t *testing.T) {
 	}
 	// The labels this app is known to export. A test that saw none of them
 	// would pass by looking at nothing.
-	for _, name := range []string{"authority_role", "authority", "emergency_authority", "module", "version", "commit", "go_version"} {
+	for _, name := range []string{"authority_role", "authority", "emergency_authority", "module", "version", "commit", "go_version", "slot"} {
 		_, found := seen[name]
 		require.True(t, found, "no exported series carries the label %q, so this test did not look at it", name)
 	}

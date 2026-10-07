@@ -118,7 +118,7 @@ func (a *App) emitTelemetry() {
 	} else {
 		emitCoreSlotTelemetry(snap)
 		// Per-slot settlement joins coreslot (which slots are active) with mining
-		// (each slot's latest settlement). The slot set is coreslot's, so it is
+		// (each slot's settlement backlog). The slot set is coreslot's, so it is
 		// emitted here, where that set is in hand.
 		a.emitSlotSettlements(ctx, snap.ActiveSlotIDs)
 	}
@@ -232,35 +232,30 @@ func emitRewardsTelemetry(snap rewardskeeper.TelemetrySnapshot) {
 	setGauge(module, "release_enabled", boolGauge(snap.ReleaseEnabled))
 }
 
-// emitSlotSettlements exports, per ACTIVE slot, that slot's latest settlement
-// epoch and outcome — the per-slot settlement view that until now lived only in
-// the logs. The slot set is coreslot's active slots (bounded), and each read is a
-// single descending row from the mining module (LastSlotSettlement), so the whole
-// export is bounded by the active-slot count. A per-slot read failure skips that
-// slot and is counted, like every other module read here; it runs through the
-// same committed-store cache and writes nothing.
+// emitSlotSettlements exports, per ACTIVE slot, that slot's settlement backlog:
+// the epoch of its oldest open settlement (0 when it has none) and whether that
+// settlement is past its participant deadline. The slot set is coreslot's active
+// slots (bounded), and each slot costs one bounded read in the mining module
+// (SlotSettlementState), so the export is bounded by the active-slot count. A
+// per-slot read failure skips that slot and is counted, like every other module
+// read here; it runs through the same committed-store cache and writes nothing.
+//
+// Both gauges are emitted for every active slot, settled or not, so a series
+// that disappears means the slot left the active set, never that it caught up.
 func (a *App) emitSlotSettlements(ctx sdk.Context, activeSlotIDs []uint64) {
 	for _, slotID := range activeSlotIDs {
-		ss, err := a.MiningKeeper.LastSlotSettlement(ctx, slotID)
+		state, err := a.MiningKeeper.SlotSettlementState(ctx, slotID)
 		if err != nil {
 			a.reportTelemetryReadFailure(miningtypes.ModuleName, err)
 			continue
 		}
-		if !ss.Found {
-			// No settlement for this slot yet: emit no series rather than a fake
-			// epoch 0, which would read as "settled epoch 0".
-			continue
-		}
-		slot := []metrics.Label{telemetry.NewLabel("slot", strconv.FormatUint(ss.SlotID, 10))}
+		slot := []metrics.Label{telemetry.NewLabel("slot", strconv.FormatUint(state.SlotID, 10))}
 		telemetry.SetGaugeWithLabels(
-			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_epoch"},
-			float32(ss.Epoch), slot)
+			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_oldest_open_settlement_epoch"},
+			float32(state.OldestOpenEpoch), slot)
 		telemetry.SetGaugeWithLabels(
-			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_finalized"},
-			boolGauge(ss.Finalized), slot)
-		telemetry.SetGaugeWithLabels(
-			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_last_settlement_info"},
-			1, append(slot, telemetry.NewLabel("reason", ss.FinalizationReason)))
+			[]string{telemetryNamespace, miningtypes.ModuleName, "slot_settlement_overdue"},
+			boolGauge(state.Overdue), slot)
 	}
 }
 

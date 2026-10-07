@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"cosmossdk.io/collections"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
 	"github.com/twilight-project/twilight-core/x/mining/keeper"
@@ -31,59 +30,102 @@ func TestTelemetrySnapshotRefusesAMissingClock(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInvalidState)
 }
 
-// setSettlement writes one row at (slot, epoch) with a given outcome, the only
-// state LastSlotSettlement reads.
-func setSettlement(t *testing.T, k keeper.Keeper, ctx sdk.Context, slot, epoch uint64, finalized bool, reason types.SettlementFinalizationReason) {
-	t.Helper()
-	require.NoError(t, k.Settlements.Set(ctx, collections.Join(slot, epoch), types.Settlement{
-		SlotId:             slot,
-		Epoch:              epoch,
-		Finalized:          finalized,
-		FinalizationReason: reason,
-	}))
+// The oldest OPEN row is reported, not the newest row: with epoch 1 sealed and
+// epoch 2 still open, slot 1 reports epoch 2. Slot id and epoch differ, so a
+// gauge fed the wrong one of the two cannot pass.
+func TestSlotSettlementStateReportsTheOldestOpenSettlement(t *testing.T) {
+	k, ctx, rewards := settlementFixture(t)
+	rewards.finalize(2, entitlement(1, 2, fixtureEntitlement))
+	require.NoError(t, k.EndBlock(ctx))
+
+	state, err := k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 1}, state,
+		"two open rows: the older one is the backlog")
+
+	_, _, err = k.FinalizeSettlement(ctx, finalize(settlementSigner))
+	require.NoError(t, err)
+
+	state, err = k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 2}, state)
 }
 
-// The latest row is the greatest epoch, read as a single descending row — not a
-// scan back for the last finalized one. An open latest row reports open.
-func TestLastSlotSettlementReturnsGreatestEpoch(t *testing.T) {
-	k, ctx := setupKeeper(t, &coreSlotKeeperMock{})
-	// Slot 1 has settled three epochs; the newest (3) is still open.
-	setSettlement(t, k, ctx, 1, 1, true, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY)
-	setSettlement(t, k, ctx, 1, 2, true, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_AFTER_DEADLINE)
-	setSettlement(t, k, ctx, 1, 3, false, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED)
+// An older row left open while a newer one seals is still the backlog. This is
+// the case a latest-row view cannot see.
+func TestSlotSettlementStateSeesAnOlderRowLeftOpen(t *testing.T) {
+	k, ctx, rewards := settlementFixture(t)
+	rewards.finalize(2, entitlement(1, 2, fixtureEntitlement))
+	require.NoError(t, k.EndBlock(ctx))
 
-	got, err := k.LastSlotSettlement(ctx, 1)
+	_, _, err := k.FinalizeSettlement(ctx, &types.MsgFinalizeSettlement{
+		Signer: account(settlementSigner), SlotId: 1, Epoch: 2,
+	})
 	require.NoError(t, err)
-	require.Equal(t, keeper.SlotSettlement{
-		SlotID:             1,
-		Epoch:              3,
-		Finalized:          false,
-		FinalizationReason: types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED.String(),
-		Found:              true,
-	}, got)
+
+	state, err := k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 1}, state)
 }
 
-// A slot with no row yet reports Found=false rather than a fabricated epoch 0,
-// which the app relies on to emit no series for it.
-func TestLastSlotSettlementReportsNoRow(t *testing.T) {
-	k, ctx := setupKeeper(t, &coreSlotKeeperMock{})
+// Overdue turns on exactly at the derived deadline, the boundary at which the
+// Settlement query starts reporting permissionless_finalization_now.
+func TestSlotSettlementStateTurnsOverdueAtTheDeadline(t *testing.T) {
+	k, ctx, _ := settlementFixture(t)
 
-	got, err := k.LastSlotSettlement(ctx, 7)
+	pastDeadline(t, k, ctx, -1)
+	state, err := k.SlotSettlementState(ctx, 1)
 	require.NoError(t, err)
-	require.Equal(t, keeper.SlotSettlement{SlotID: 7}, got)
-	require.False(t, got.Found)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 1, Overdue: false}, state,
+		"one tick before the deadline")
+
+	pastDeadline(t, k, ctx, 0)
+	state, err = k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 1, Overdue: true}, state,
+		"at the deadline")
 }
 
-// The descending range is prefixed by slot, so one slot's rows never leak into
-// another's latest — slot 2's newest epoch is its own, not slot 1's higher one.
-func TestLastSlotSettlementIsScopedPerSlot(t *testing.T) {
-	k, ctx := setupKeeper(t, &coreSlotKeeperMock{})
-	setSettlement(t, k, ctx, 1, 9, true, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY)
-	setSettlement(t, k, ctx, 2, 4, true, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY)
-
-	got, err := k.LastSlotSettlement(ctx, 2)
+// Nothing open reads as epoch 0 and not overdue, for a slot that has sealed
+// everything and for one that never had a settlement at all.
+func TestSlotSettlementStateWithNothingOpen(t *testing.T) {
+	k, ctx, _ := settlementFixture(t)
+	pastDeadline(t, k, ctx, 5)
+	_, _, err := k.FinalizeSettlement(ctx, finalize(settlementSigner))
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), got.SlotID)
-	require.Equal(t, uint64(4), got.Epoch)
-	require.Equal(t, types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY.String(), got.FinalizationReason)
+
+	state, err := k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1}, state,
+		"a sealed row past its deadline is not overdue")
+
+	state, err = k.SlotSettlementState(ctx, 7)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 7}, state)
+}
+
+// The index only nominates; the canonical row decides. An index entry that
+// disagrees with the rows is an error, never a value, and it stays inside its
+// own slot's prefix.
+func TestSlotSettlementStateRefusesAnIndexThatDisagreesWithTheRows(t *testing.T) {
+	k, ctx, _ := settlementFixture(t)
+
+	// An entry for slot 2 with no canonical row behind it.
+	require.NoError(t, k.OpenSettlementsBySlot.Set(ctx, collections.Join(uint64(2), uint64(1)), 1))
+	_, err := k.SlotSettlementState(ctx, 2)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.ErrorContains(t, err, "which has no settlement")
+
+	state, err := k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, keeper.SlotSettlementState{SlotID: 1, OldestOpenEpoch: 1}, state,
+		"slot 2's entry is outside slot 1's prefix")
+
+	// An entry naming a row that is already finalized.
+	_, _, err = k.FinalizeSettlement(ctx, finalize(settlementSigner))
+	require.NoError(t, err)
+	require.NoError(t, k.OpenSettlementsBySlot.Set(ctx, collections.Join(uint64(1), uint64(1)), 1))
+	_, err = k.SlotSettlementState(ctx, 1)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.ErrorContains(t, err, "which is finalized")
 }
