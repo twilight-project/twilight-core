@@ -23,7 +23,7 @@ title: Glossary
 | **Settlement** | The `x/mining` process that releases an entitlement: participants are paid by chunk, and finalization returns the remainder to the snapshotted payout. |
 | **Authority** | The CoreSlot account that decides the validator set, sets CoreSlot params, schedules on-chain upgrades, and can queue a rewards params update. Handed over only by nomination and acceptance. |
 | **Emergency authority** | The CoreSlot account that can pause and resume rewards (one canonical state, effective at H+1) and suspend a slot. |
-| **Module account** | `rewards` (Minter; holds minted emission and unreleased entitlements) and `rewards_fee_pool` (dormant, no permissions). |
+| **Module account** | One of five keyless accounts declared in `app/config.go`: `rewards` (the only minter; holds minted emission and unreleased entitlements), `rewards_fee_pool` (dormant), `fee_collector` (the SDK's fee destination, unused), `coreslot-authority` and `coreslot-emergency` (the authority the SDK modules are bound to, and the default-genesis placeholders). All are refused as payees. |
 | **`utwlt`** | The native base denom — the only accounting denom. |
 | **`twlt` / `TWLT`** | Display denom / symbol — metadata only. |
 | **Treasury** | An optional external address receiving a configured share of emission; default share is zero. |

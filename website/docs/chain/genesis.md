@@ -80,6 +80,11 @@ jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 jq '.app_state.mining' ~/.twilightd/config/genesis.json
 ```
 
+A default genesis is not a launch genesis: it names keyless module accounts as both
+authorities and holds no slots. The commands that turn it into one, and
+`make check-genesis`, are on
+[Genesis Reference → Building a launch genesis](../reference/genesis-reference.md#building-a-launch-genesis).
+
 ## Localnet fixtures (not production)
 
 The localnet `init.sh` funds the authority and emergency accounts with

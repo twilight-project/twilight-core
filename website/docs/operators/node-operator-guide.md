@@ -205,4 +205,4 @@ rewards module is fail-closed and will halt the block on a finalization fault (s
 | Node won't start | genesis validity (`twilightd validate-genesis`); port conflicts |
 | Halts at a height with EndBlock error | rewards finalization fault — inspect logs; this is fail-closed by design |
 | App-hash divergence vs peers | **critical** — stop and investigate a possible fork |
-| Empty validator set at InitChain | genesis must include at least one active CoreSlot |
+| Empty validator set at InitChain | genesis must include at least `min_active_slots` ACTIVE CoreSlots, added with `coreslot-genesis add` ([building a genesis](../reference/genesis-reference.md#building-a-launch-genesis)) |

@@ -43,10 +43,14 @@ fixture, not a production premine — see [Localnet](localnet.md) and
 |---|---|---|
 | `{constants.rewardsModuleAccount}` | `Minter` | Holds minted epoch emission and unreleased entitlements; the only minter on the chain |
 | `{constants.feePoolModuleAccount}` | _(none)_ | Dormant fee plumbing; holds nothing while fees are disabled |
+| `fee_collector` | _(none)_ | The SDK's standard fee destination; holds nothing, since the chain charges no fees |
+| `coreslot-authority` | _(none)_ | Keyless: the authority the SDK modules are bound to, so their own authority messages cannot be signed; also what `twilightd init` writes as both CoreSlot authorities until a launch sets real ones |
+| `coreslot-emergency` | _(none)_ | Keyless placeholder for the emergency authority in a default genesis |
 
-Module-account permissions are declared in `app/config.go`. The
-`{constants.rewardsModuleAccount}` account is the sole `Minter`; the
-`{constants.feePoolModuleAccount}` account has **no** permissions.
+All five are declared once in `app/config.go`, and that declaration also feeds the
+economic-address rule: a module account is refused as a payout, settlement or treasury
+address. Only `{constants.rewardsModuleAccount}` can mint; nothing can burn. Addresses
+and queries are on [Module Accounts](../reference/module-accounts.md).
 
 :::note Fees are dormant
 Fee collection and fee distribution are **disabled** in the current version. The
