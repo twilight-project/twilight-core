@@ -3,26 +3,31 @@ import Link from "@docusaurus/Link";
 import Layout from "@theme/Layout";
 import styles from "./index.module.css";
 
+// The site documents `main`. The release named here is the latest tag; update it as
+// part of cutting a release (see CONTRIBUTING.md, "Building a release").
+const latestRelease = "v0.3.0-rc5";
+const releasesUrl = "https://github.com/twilight-project/twilight-core/releases";
+
 type Card = { title: string; desc: string; to: string; tag: string };
 
 const cards: Card[] = [
   {
     tag: "Operators",
     title: "Run a node",
-    desc: "Build, initialize, and run twilightd; spin up a localnet and a rewards smoke.",
-    to: "/getting-started/quickstart",
+    desc: "Build, initialize, configure, and run twilightd; then a localnet for multi-node tests.",
+    to: "/operators/node-operator-guide",
   },
   {
     tag: "Validators",
-    title: "CoreSlot validators",
-    desc: "The PoA validator authority: slots, operator and payout addresses, reward weight.",
+    title: "CoreSlots",
+    desc: "What a validator slot is: its operator and payout addresses, its status, and how it relates to rewards.",
     to: "/operators/coreslot-operator-guide",
   },
   {
-    tag: "Users",
-    title: "Epoch lifecycle",
-    desc: "How an epoch closes, what it mints, and the entitlement it leaves behind.",
-    to: "/rewards/epoch-lifecycle",
+    tag: "Integrators",
+    title: "Query the chain",
+    desc: "The command groups, and the gRPC and REST query surfaces with their OpenAPI spec.",
+    to: "/reference/cli",
   },
   {
     tag: "Concepts",
@@ -37,7 +42,7 @@ const cards: Card[] = [
     to: "/development/repo-map",
   },
   {
-    tag: "Auditors",
+    tag: "Status",
     title: "Status & validation",
     desc: "Current validation evidence, known limitations, and what has not yet been done.",
     to: "/chain/status-and-validation",
@@ -48,29 +53,38 @@ export default function Home(): React.ReactElement {
   return (
     <Layout
       title="Twilight Chain Docs"
-      description="Documentation for the Twilight CoreSlot Proof-of-Authority chain and the utwlt rewards module."
+      description="Documentation for Twilight Chain, a CoreSlot Proof-of-Authority chain with utwlt rewards, and for the public Twilight Testnet."
     >
       <header className={styles.hero}>
         <div className={styles.heroInner}>
           <span className={styles.eyebrow}>CoreSlot PoA · utwlt rewards</span>
           <h1 className={styles.title}>Twilight Chain</h1>
           <p className={styles.tagline}>
-            A minimal Cosmos SDK Proof-of-Authority chain with scheduled{" "}
-            <code>utwlt</code> block rewards — finalized per epoch and released to
-            CoreSlot operators through settlement.
+            A Cosmos SDK / CometBFT Proof-of-Authority chain. Validators are
+            authority-admitted CoreSlots; each epoch mints a bounded{" "}
+            <code>utwlt</code> reward that is held as a per-slot entitlement and
+            released by settlement.
           </p>
           <div className={styles.ctaRow}>
             <Link className={styles.ctaPrimary} to="/getting-started/overview">
               Get started
             </Link>
-            <Link className={styles.ctaSecondary} to="/rewards/overview">
-              Rewards overview →
+            <Link className={styles.ctaSecondary} to="/operators/node-operator-guide">
+              Run a node
+            </Link>
+            <Link className={styles.ctaSecondary} to="/chain/architecture">
+              Understand the design
             </Link>
           </div>
           <p className={styles.statusNote}>
-            Under active development — not yet mainnet-ready and not externally
-            audited.{" "}
+            <strong>Twilight Testnet</strong> is a public, pre-1.0 network: not
+            externally audited, and its tokens have no value.{" "}
             <Link to="/chain/status-and-validation">Status &amp; validation</Link>.
+          </p>
+          <p className={styles.statusNote}>
+            This site documents the <code>main</code> branch. The latest release is{" "}
+            <a href={releasesUrl}>{latestRelease}</a>; a command documented here may
+            be newer than that binary.
           </p>
         </div>
       </header>
@@ -80,7 +94,7 @@ export default function Home(): React.ReactElement {
           {cards.map((c) => (
             <Link key={c.title} className={styles.card} to={c.to}>
               <span className={styles.cardTag}>{c.tag}</span>
-              <h3 className={styles.cardTitle}>{c.title}</h3>
+              <h2 className={styles.cardTitle}>{c.title}</h2>
               <p className={styles.cardDesc}>{c.desc}</p>
               <span className={styles.cardArrow}>→</span>
             </Link>

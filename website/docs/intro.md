@@ -15,9 +15,12 @@ The chain mints scheduled block rewards through the **rewards** module
 active CoreSlot operators as per-slot entitlements, which settlement later
 releases to participants and to each operator's snapshotted payout address.
 
-Twilight Core is under active development — it is not yet mainnet-ready and has not
-been externally audited. See [Status & Validation](chain/status-and-validation.md)
-for what has been validated and what has not.
+**Twilight Testnet** is live: a public, pre-1.0 network that is not externally
+audited and whose tokens have no value. This site documents the `main` branch; the
+latest release is [v0.3.0-rc5](https://github.com/twilight-project/twilight-core/releases),
+and a command documented here may be newer than that binary. See
+[Status & Validation](chain/status-and-validation.md) for what has been validated
+and what has not.
 
 ## What `utwlt` is
 

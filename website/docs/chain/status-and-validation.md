@@ -6,7 +6,8 @@ title: Status & Validation
 
 ## Status
 
-Twilight Core is under active development. The current implementation provides the
+Twilight Core is under active development. It runs today as **Twilight Testnet**,
+a public testnet whose tokens have no value. The current implementation provides the
 **CoreSlot** Proof-of-Authority validator lifecycle and a bounded **Rewards**
 emission and settlement system denominated in `utwlt`. It is **not yet mainnet-ready**
 and has **not undergone an external security audit**.
@@ -40,8 +41,9 @@ Each behavior below is exercised by the evidence type named next to it.
 ## Known limitations
 
 - **Not externally audited.** No independent security review has been performed.
-- **Not mainnet-ready.** Public devnet and mainnet operation still require
-  deployment validation beyond what is listed above.
+- **Not mainnet-ready.** This is a public testnet; any network carrying value
+  requires an external audit and further deployment validation beyond what is
+  listed above.
 - **Multi-day cross-host endurance is not yet done.** Cross-host coverage to date
   is the fault-tolerance drills above plus single-host endurance soak; a sustained
   multi-day run across hosts is still pending.

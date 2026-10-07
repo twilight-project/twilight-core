@@ -103,7 +103,26 @@ const config: Config = {
     },
     footer: {
       style: "dark",
-      links: [],
+      links: [
+        {
+          title: "Project",
+          items: [
+            {
+              label: "Releases",
+              href: "https://github.com/twilight-project/twilight-core/releases",
+            },
+            {
+              label: "Security policy",
+              href: "https://github.com/twilight-project/twilight-core/blob/main/SECURITY.md",
+            },
+            {
+              label: "Issues",
+              href: "https://github.com/twilight-project/twilight-core/issues",
+            },
+            { label: "Status & validation", to: "/chain/status-and-validation" },
+          ],
+        },
+      ],
       copyright: "Twilight Chain Docs — built from the twilight-core repository.",
     },
     prism: {

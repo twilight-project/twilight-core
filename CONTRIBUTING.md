@@ -129,6 +129,10 @@ absent from the archive rather than merely undetected. The release is written to
 - `SHA256SUMS`, covering all six files. An operator checking a single binary runs
   `sha256sum -c --ignore-missing SHA256SUMS`.
 
+Once the tag and its GitHub release exist, update the latest-release line on the
+documentation site, which names the release in two places: `latestRelease` in
+`website/src/pages/index.tsx` and the opening paragraph of `website/docs/intro.md`.
+
 `THIRD_PARTY_NOTICES` is generated at release time by `scripts/third-party-notices.sh`, from
 the same exported tree as the binaries. It carries the license, `NOTICE` and `PATENTS` files of
 every module linked into `twilightd` (the union over the release targets) and of Go itself,
