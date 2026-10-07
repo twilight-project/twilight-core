@@ -70,8 +70,17 @@ the numbering below is this project's convention for them:
 
 - **minor** (`v0.2.0`, `v0.3.0`, …) — a state-machine change. Ships a registered upgrade
   handler **named after the version it upgrades to**, and needs a coordinated halt.
-- **patch** (`v0.1.1`, `v0.2.1`, …) — node-local only: pruning, RPC, indexer, p2p. No
-  upgrade handler; operators roll one at a time.
+- **patch** (`v0.1.1`, `v0.2.1`, …) — node-local only: pruning, RPC, indexer, p2p,
+  telemetry, dependencies. No upgrade handler; operators roll one at a time.
+
+A line's first tag without an `-rc` suffix is its **final**: the line's state machine is
+settled, nothing pending would change a block on it, and every remaining state-machine item
+belongs to the next minor. A final is not a readiness claim; readiness is stated in
+[`README.md`](README.md), [`SECURITY.md`](SECURITY.md) and the status page. Release
+candidates (`-rc1`, `-rc2`, …) exist only while a line's state machine may still change
+before its final; once the final is tagged, node-local changes on that line ship as patches,
+never as further candidates. `v0.3.0` was the first line to follow this rule (its `-rc1`
+through `-rc5` predate it).
 
 `v0.1.0` is the **first proven upgrade-capable operational baseline** — the first version
 carrying `x/upgrade`, with the upgrade proven end to end across four validators and
