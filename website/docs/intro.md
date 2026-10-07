@@ -17,7 +17,7 @@ releases to participants and to each operator's snapshotted payout address.
 
 **Twilight Testnet** is live: a public, pre-1.0 network that is not externally
 audited and whose tokens have no value. This site documents the `main` branch; the
-latest release is [v0.3.0-rc5](https://github.com/twilight-project/twilight-core/releases),
+latest release is [v0.3.0](https://github.com/twilight-project/twilight-core/releases),
 and a command documented here may be newer than that binary. See
 [Status & Validation](chain/status-and-validation.md) for what has been validated
 and what has not.
