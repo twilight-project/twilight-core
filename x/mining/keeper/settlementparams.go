@@ -353,6 +353,15 @@ func (k Keeper) SettlementDeadlineClock(
 	if err != nil {
 		return 0, err
 	}
+	return k.settlementDeadlineFromAnchor(ctx, settlement, anchor)
+}
+
+// settlementDeadlineFromAnchor is SettlementDeadlineClock for a caller that has
+// already resolved and checked the anchor, so the row's bound parameters are
+// verified and the deadline derived without resolving the anchor a second time.
+func (k Keeper) settlementDeadlineFromAnchor(
+	ctx context.Context, settlement types.Settlement, anchor types.SettlementEpochAnchor,
+) (uint64, error) {
 	params, err := k.SettlementParamsForTarget(ctx, settlement.Epoch)
 	if err != nil {
 		return 0, err

@@ -114,11 +114,22 @@ func (k Keeper) SlotSettlementState(ctx context.Context, slotID uint64) (SlotSet
 			"the open-settlement index lists slot %d in epoch %d, which is finalized", slotID, epoch)
 	}
 
-	deadline, err := k.SettlementDeadlineClock(ctx, settlement)
+	anchor, err := k.requireEpochAnchor(ctx, settlement.Epoch)
 	if err != nil {
 		return SlotSettlementState{}, err
 	}
 	clock, err := k.GetSettlementClock(ctx)
+	if err != nil {
+		return SlotSettlementState{}, err
+	}
+	// The same guard the Settlement query and both finalization arms apply before
+	// deriving a deadline. An anchor ahead of the clock is corruption; a deadline
+	// derived from it would report a settlement that nothing can finalize as not
+	// overdue, so it is a read failure here, exactly as it is a refusal there.
+	if err := requireAnchorHasElapsed(settlement, anchor, clock); err != nil {
+		return SlotSettlementState{}, err
+	}
+	deadline, err := k.settlementDeadlineFromAnchor(ctx, settlement, anchor)
 	if err != nil {
 		return SlotSettlementState{}, err
 	}

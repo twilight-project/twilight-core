@@ -240,8 +240,10 @@ func emitRewardsTelemetry(snap rewardskeeper.TelemetrySnapshot) {
 // per-slot read failure skips that slot and is counted, like every other module
 // read here; it runs through the same committed-store cache and writes nothing.
 //
-// Both gauges are emitted for every active slot, settled or not, so a series
-// that disappears means the slot left the active set, never that it caught up.
+// Both gauges are emitted for every active slot, settled or not: a caught-up slot
+// reads 0 / 0. A series that disappears therefore means the slot left the active
+// set, or that this node could not read it (a per-slot failure here, or the
+// coreslot snapshot failing) — never that it caught up.
 func (a *App) emitSlotSettlements(ctx sdk.Context, activeSlotIDs []uint64) {
 	for _, slotID := range activeSlotIDs {
 		state, err := a.MiningKeeper.SlotSettlementState(ctx, slotID)

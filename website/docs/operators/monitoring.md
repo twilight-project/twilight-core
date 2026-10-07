@@ -169,6 +169,7 @@ Distance to the next halving in supply terms is
 |---|---|---|---|
 | `twilight_mining_settlement_clock` | ticks | The monotonic settlement clock; ticks once per block whose beginning-of-block pause state permits release | increases by 1 per block while `release_enabled = 1` |
 | `twilight_mining_last_processed_reward_epoch` | epoch | Materialization cursor: the greatest reward epoch whose settlement set exists | `= twilight_rewards_last_finalized_epoch` |
+
 Each ACTIVE slot also exports its settlement backlog, one series of each per slot:
 
 | Metric | Labels | Meaning | Healthy |
@@ -186,16 +187,20 @@ while still owing an older one. Points that follow from how these are read:
 - **Pauses.** The deadline is measured on the settlement clock, which stops while
   release is paused, so a pause never makes a settlement overdue. One that was
   already overdue stays overdue through a pause, while finalization is refused.
-- **`OPERATOR_ONLY` settlements** have no participant window: their deadline is their
-  creation, so an open one reads overdue as soon as it exists.
+- **`OPERATOR_ONLY` settlements** (a mode this version does not create) have no
+  participant window: their deadline is their creation, so an open one would read
+  overdue as soon as it exists.
 - **A slot that leaves the ACTIVE set drops out**, even if it still owes settlements.
   Its series stop updating and the sink expires them after `prometheus-retention-time`.
-  Check what such a slot owes with `twilightd query mining open-settlements <slot-id>`.
+  Check what such a slot owes with
+  `twilightd mining-query open-settlements <slot-id>`; the answer is paginated and
+  complete only when `next_key` is empty.
 - **The index only nominates.** The canonical row decides. An index entry with no
   row, or one naming a finalized row, is counted in
   `twilight_telemetry_read_failures_total{module="mining"}` and that slot's gauges
-  are skipped. A *lost* index entry would hide its row here. The `open-settlements`
-  query reads canonical rows and remains the authority on what a slot owes.
+  are skipped: they keep their last value until the retention time expires them. A
+  *lost* index entry would hide its row here. The `open-settlements` query reads
+  canonical rows and remains the authority on what a slot owes.
 
 Deliberately **not** exported: a count of open settlements. The module keeps no
 counter, and the only derivation walks the open-settlement index, whose size is
@@ -282,7 +287,7 @@ testnet's 360-block epochs; scale to your epoch length.
 | Accrual stalled | `increase(twilight_rewards_open_reward_enabled_blocks[10m]) == 0 and twilight_rewards_paused == 0 and increase(twilight_rewards_current_epoch[10m]) == 0` | Blocks are committing but no reward-enabled block is being credited |
 | Epoch not finalizing | `changes(twilight_rewards_last_finalized_epoch[1h]) == 0` with `for: 1h` (window ≈ 2× the epoch's wall-clock length: 360 blocks × 5 s = 30 min; the `for` keeps a freshly appeared series, which has no changes yet, from firing) | A finalization boundary passed without a finalized epoch. **Pair with the liveness alert below:** during a full halt the gauge expires and this expression returns nothing |
 | Materialization behind | `twilight_rewards_last_finalized_epoch - twilight_mining_last_processed_reward_epoch > 0` for more than one block | A finalized epoch has no settlement set |
-| Slot settlement overdue | `max by (chain_id, slot) (twilight_mining_slot_settlement_overdue{chain_id="<chain>"}) == 1 and on (chain_id) max by (chain_id) (twilight_rewards_paused{chain_id="<chain>"}) == 0` | A slot owes a settlement past its participant deadline, which anyone may now finalize. Not raised while the chain is paused, because finalization is refused then. Find the epoch with `twilight_mining_slot_oldest_open_settlement_epoch` |
+| Slot settlement overdue | `max by (chain_id, slot) (twilight_mining_slot_settlement_overdue{chain_id="<chain>"}) == 1 and on (chain_id) max by (chain_id) (twilight_rewards_paused{chain_id="<chain>"}) == 0` | A slot owes a settlement past its participant deadline, which anyone may now finalize. Not raised while the chain is paused, because finalization is refused then. Find the epoch with `twilight_mining_slot_oldest_open_settlement_epoch`. A slot that leaves the ACTIVE set stops exporting the gauge, so the alert resolves on its own while the settlement is still owed: check such a slot with `open-settlements` |
 | Escrow imbalance | `twilight_rewards_escrow_solvency_delta_utwlt != 0` | Money in escrow no longer matches what is owed |
 | Unexpected pause | `twilight_rewards_paused == 1` | Correlate with operator intent |
 | Validator set changed | `changes(twilight_coreslot_active_slots[1h]) > 0` | Every change should map to a known admission or removal |

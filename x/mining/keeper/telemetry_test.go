@@ -107,6 +107,45 @@ func TestSlotSettlementStateWithNothingOpen(t *testing.T) {
 // The index only nominates; the canonical row decides. An index entry that
 // disagrees with the rows is an error, never a value, and it stays inside its
 // own slot's prefix.
+// A corrupted anchor ahead of the clock is refused, as the Settlement query and
+// both finalization arms refuse it, rather than exported as "not overdue" for a
+// settlement that nothing can finalize.
+func TestSlotSettlementStateRefusesAFutureAnchor(t *testing.T) {
+	k, ctx, _ := settlementFixture(t)
+	pastDeadline(t, k, ctx, 10)
+	state, err := k.SlotSettlementState(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, state.Overdue)
+
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	anchor, found, err := k.GetSettlementEpochAnchor(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	anchor.CreatedSettlementClock = clock + 1
+	require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, anchor))
+
+	_, err = k.SlotSettlementState(ctx, 1)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+}
+
+// The canonical row is read through GetSettlement, so a row whose body declares a
+// different key is refused even when the epoch it declares is real.
+func TestSlotSettlementStateValidatesTheCanonicalRow(t *testing.T) {
+	k, ctx, rewards := settlementFixture(t)
+	rewards.finalize(2, entitlement(1, 2, fixtureEntitlement))
+	require.NoError(t, k.EndBlock(ctx))
+
+	row, found, err := k.GetSettlement(ctx, 1, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	row.Epoch = 2
+	require.NoError(t, k.Settlements.Set(ctx, collections.Join(uint64(1), uint64(1)), row))
+
+	_, err = k.SlotSettlementState(ctx, 1)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+}
+
 func TestSlotSettlementStateRefusesAnIndexThatDisagreesWithTheRows(t *testing.T) {
 	k, ctx, _ := settlementFixture(t)
 

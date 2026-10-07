@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/telemetry"
@@ -346,6 +347,54 @@ func TestTelemetryReportsTheSlotSettlementBacklog(t *testing.T) {
 	values = gather()
 	require.Equal(t, float64(2), gauge(values, oldest), "later epochs opening do not move the backlog")
 	require.Equal(t, float64(1), gauge(values, overdue), "at the deadline")
+}
+
+// A slot that catches up keeps exporting, at 0 / 0. The monitoring page promises
+// that a series which disappears means the slot left the active set, never that
+// it caught up; this is what makes that promise true.
+func TestTelemetryKeepsExportingACaughtUpSlotAtZero(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+	values := gather()
+	require.Equal(t, float64(1), values[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`])
+
+	_, err := miningkeeper.NewMsgServer(chain.app.MiningKeeper).FinalizeSettlement(chain.headContext(),
+		&miningtypes.MsgFinalizeSettlement{Signer: chain.credential, SlotId: 1, Epoch: 1})
+	require.NoError(t, err)
+	chain.commitThrough(t, chain.head+1)
+
+	values = gather()
+	oldest, found := values[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`]
+	require.True(t, found, "a caught-up slot must keep its series")
+	require.Equal(t, float64(0), oldest)
+	overdue, found := values[`twilight_mining_slot_settlement_overdue{slot="1"}`]
+	require.True(t, found, "a caught-up slot must keep its series")
+	require.Equal(t, float64(0), overdue)
+}
+
+// A per-slot read failure is counted against the mining module and that slot's
+// gauges are skipped: they keep their last value rather than being re-set to a
+// "caught up" 0 / 0. The failure driven here is an index entry whose canonical
+// row is gone, which the keeper refuses to export as a value.
+func TestTelemetryCountsASlotReadFailureAndSkipsTheSlot(t *testing.T) {
+	gather := enableTelemetry(t)
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, epochLength+2)
+	before := gather()
+	require.Equal(t, float64(1), before[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`])
+	failuresBefore := before[`twilight_telemetry_read_failures_total{module="mining"}`]
+
+	require.NoError(t, chain.app.MiningKeeper.Settlements.Remove(chain.headContext(),
+		collections.Join(uint64(1), uint64(1))))
+	chain.app.EmitTelemetryForTest()
+
+	after := gather()
+	require.Equal(t, failuresBefore+1, after[`twilight_telemetry_read_failures_total{module="mining"}`],
+		"the failed slot read is counted against the mining module")
+	require.Equal(t, float64(1), after[`twilight_mining_slot_oldest_open_settlement_epoch{slot="1"}`],
+		"the slot's gauge keeps its last value; it is not re-set")
+	require.Equal(t, float64(0), after[`twilight_mining_slot_settlement_overdue{slot="1"}`])
 }
 
 // The authority addresses are exported as labels because the nomination gauge
