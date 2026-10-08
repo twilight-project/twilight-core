@@ -4,52 +4,63 @@ title: Testing
 
 # Testing
 
-What to run, and which layer covers which risk. The CoreSlot test plan
-is in the repository at `docs/testing/coreslot-test-plan.md`.
+What to run, and which layer covers which risk. The end-to-end targets are on
+[Localnet Drills](localnet-drills.md); the repository's testing records are under
+`docs/testing/` (the validation summary, the CoreSlot test plan, the module
+simulations and the drill reports).
 
 ## Commands
 
-```bash
-go test ./x/rewards/keeper -count=1     # economics
-go test ./x/rewards/types -count=1      # params validation, genesis schema
-go test ./x/rewards/... -count=1        # incl. client/cli construction tests
-go test ./app -count=1                  # runtime wiring, export/import, fail-closed
-go test ./app -run Simulation -count=1  # randomized state-machine sims
-go test ./... -count=1                  # everything
-go vet ./...
-go build ./cmd/twilightd
+The `make` targets run what CI runs:
 
-make localnet-smoke                      # node startup + agreement (no epoch close)
-make localnet-rewards-epoch-smoke        # multi-node epoch finalization + entitlements
+```bash
+make build                 # stamped binary at build/twilightd (CI: go build ./...)
+make test                  # go test ./...  (CI adds -count=1)
+make consensus-vectors     # protocol-vector conformance
+make lint                  # golangci-lint (CI pins v2.12.2 and gates only new issues)
+make vet                   # go vet ./...  (CI: golangci-lint's govet)
+make vuln                  # govulncheck (pinned inside the script; blocking in CI)
 ```
 
-## Which test covers which risk
+Narrower runs while working:
+
+```bash
+go test ./x/coreslot/... -count=1
+go test ./x/rewards/... -count=1
+go test ./x/mining/... -count=1
+go test ./app -count=1                        # wiring, settlement on the real bank, export/import, upgrades
+go test ./app -run Simulation -count=1        # the two seeded state-machine simulations
+```
+
+## Which layer covers which risk
 
 | Layer | Risk covered |
 |---|---|
-| `x/rewards/keeper` | emission math, active-block accounting, atomic finalization, active-block participation allocation, entitlement release, params, pause/resume, invariants |
-| `x/rewards/types` | params validation, genesis round-trip |
-| `x/rewards/client/cli` | CLI request/message construction (incl. pagination) |
-| `app` | app/runtime wiring, `InitChain`+`FinalizeBlock` dispatch, export/import, fail-closed lifecycle |
-| `make localnet-rewards-epoch-smoke` | **multi-node** finalization determinism + cross-node app-hash agreement |
-| randomized state-machine simulations | fixed-seed CoreSlot lifecycle and rewards accounting invariant coverage across long random operation sequences |
+| `x/coreslot/keeper`, `types` | slot lifecycle and its guards, key rotation, authority nomination and acceptance, upgrade scheduling, validator-update derivation, genesis validation, invariants |
+| `x/rewards/keeper`, `types` | emission and halving math, active-block accounting, atomic finalization, allocation, entitlements and the release boundary, pause, params and their histories, invariants |
+| `x/mining/keeper`, `types` | the settlement clock, materialization, chunk validation, both finalization arms, parameter histories, the economic-address rule, the Selection V1 contracts |
+| `x/*/client/cli` | each command builds the request or message it claims to; the query surface matches the pinned contract in `internal/queryapi` |
+| `internal/consensusvectors` | the tracked protocol-vector packs (`make consensus-vectors`) against the functions that implement them |
+| `app` | the assembled app: module wiring and lifecycle dispatch, settlement against the real bank, the transfer rules, query classification and height pinning, export/import, upgrade handlers |
+| simulations (`app`, `-run Simulation`) | seeded random operation sequences for CoreSlot lifecycle and rewards accounting, with the invariants checked after every step; each seed is fixed, so a failure reproduces |
+| [localnet drills](localnet-drills.md) | what needs more than one node: cross-node app-hash agreement, quorum, real signed transactions, coordinated upgrades |
 
-## Key app-level tests
+## Some app-level tests
 
 | Test | Covers |
 |---|---|
-| `TestRewardsRuntimeDispatchFinalizeBlock` | the runtime actually dispatches rewards BeginBlock/EndBlock; exact supply delta |
-| `TestRewardsInitChainGenesisAccounts` | genesis creates module accounts with correct permissions |
-| `TestRewardsAuthorityMsgRoutedThroughApp` | Msg service reachable; authority/emergency read through wired CoreSlot |
-| `TestRewardsEpochFinalizeSuspendAndRelease` | finalize → suspend → release against the real bank |
+| `TestRewardsRuntimeDispatchFinalizeBlock` | the runtime dispatches rewards BeginBlock/EndBlock; exact supply delta |
+| `TestRewardsRuntimeFinalizeBlockFailClosed` | a lifecycle fault halts the block, with no partial commit |
 | `TestDefinitivePOC1SettlementEndToEnd` | a full 360-block epoch through settlement and finalization, with exact economics |
-| `TestRewardsAppGenesisExportImportRoundTrip` | full app export/import round-trip |
-| `TestRewardsRuntimeFinalizeBlockFailClosed` | a lifecycle fault halts the block, no partial commit |
+| `TestSettlementChunkMovesRealParticipantBalances` | a settlement chunk pays participants on the real bank |
+| `TestPermissionlessFinalizationPaysTheOperatorAndNotTheCaller` | permissionless finalization sends the remainder to the slot's payout address, never to the caller |
+| `TestRewardsAppGenesisExportImportRoundTrip` | the rewards genesis, pending params included, survives export and re-import through the app's module manager |
+| `TestBothUpgradeBoundariesAreRegisteredOnTheBuiltApp` | the built app registers every upgrade handler it ships |
 
 ## Determinism expectations
 
-Rewards state transitions are integer-only: no wall-clock time, randomness,
-environment variables, or CometBFT-local config; finalization and release iterate
-sorted collections. Cross-node app-hash agreement after finalize is the
-multi-node evidence. See
-[Status & Validation](../chain/status-and-validation.md).
+State transitions are integer-only and read no wall-clock time, randomness,
+environment variables or node-local configuration; they iterate sorted collections.
+The multi-node evidence is cross-node app-hash agreement after the transition under
+test, which the smokes, the three `make drills` drills, and the upgrade, export-restore,
+block-gas, growth and soak runs check. See [Status & Validation](../chain/status-and-validation.md).
