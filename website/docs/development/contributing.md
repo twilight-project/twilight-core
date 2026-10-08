@@ -59,8 +59,9 @@ Documentation rules:
 - No mainnet/production-ready claims. Distinguish production defaults from
   localnet/test settings. Keep the funded-fixture caveat where relevant.
 - Single-source numbers via `website/docs/_snippets/constants.mdx`.
-- CLI help captures under `website/generated/cli/` are generated source material; write
-  clean reference tables, don't paste walls of `--help`.
+- Write command tables from the built binary's `--help` and from the pinned query
+  surface (`internal/queryapi/contract.go`); don't paste walls of `--help`, and don't
+  keep captures in the tree — they go stale silently.
 
 ## Commit / PR conventions
 

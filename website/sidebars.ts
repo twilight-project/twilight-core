@@ -69,9 +69,7 @@ const sidebars: SidebarsConfig = {
       label: "Reference",
       collapsed: true,
       items: [
-        { type: "doc", id: "reference/cli", label: "CLI" },
-        { type: "doc", id: "reference/rewards-query-api", label: "Rewards Query API" },
-        { type: "doc", id: "reference/rewards-tx-api", label: "Rewards Tx API" },
+        { type: "doc", id: "reference/cli", label: "CLI & Queries" },
         { type: "doc", id: "reference/genesis-reference", label: "Genesis Reference" },
         { type: "doc", id: "reference/module-accounts", label: "Module Accounts" },
       ],

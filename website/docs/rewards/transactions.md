@@ -4,10 +4,13 @@ title: Transactions
 
 # Rewards Transactions
 
-Rewards transactions follow the top-level `twilightd rewards <command>`
-convention. They wrap the existing messages only; no message infers or bypasses
-authority — the keeper enforces it. Raw `--help` captures are under
-`website/generated/cli/`.
+Rewards transactions live under `twilightd rewards <command>` (the generated
+`tx rewards` tree offers the same three as `update-rewards-params`, `pause-rewards`
+and `resume-rewards`). They wrap the messages `MsgUpdateRewardsParams`,
+`MsgPauseRewards` and `MsgResumeRewards` and nothing else; the CLI never infers or
+substitutes a signer — the message server enforces the role. The full command tables,
+including CoreSlot and settlement transactions, are on the
+[CLI Reference](../reference/cli.md#transactions).
 
 ## Commands
 
