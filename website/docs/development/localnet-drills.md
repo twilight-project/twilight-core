@@ -75,7 +75,7 @@ funded-fixture caveat that applies to every localnet.
 
 ## Chain-free checks
 
-Fast, and no network is started. The first five run in CI's *build & test* job.
+Fast, and no network is started. The first six run in CI's *build & test* job.
 
 | Target | Proves |
 |---|---|
