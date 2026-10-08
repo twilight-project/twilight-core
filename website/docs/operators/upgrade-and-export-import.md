@@ -81,9 +81,10 @@ open settlement window. Nothing expires while the network is down, however long 
 
 `block.max_gas` and `block.max_bytes` cannot be changed by any transaction: the consensus
 module's authority is a keyless account. On a running network they change only inside a
-named upgrade, whose handler sets them (`app.SetBlockParams`), so a new value is scheduled,
-halts every validator at the same height and takes effect from the next block, like any
-other state-machine change. A release that changes `max_bytes` also says what mempool bound
+named upgrade, whose handler sets them (`app.SetBlockParams`), so a new value is scheduled
+and halts every validator at the same height, like any other state-machine change. A new
+`max_bytes` takes effect from the block after the upgrade height. A new `max_gas` already
+applies to the upgrade block's own transactions: one that exceeds it fails in that block. A release that changes `max_bytes` also says what mempool bound
 operators should set, since a node's `config.toml` does not follow the change.
 
 ### What is proven, and what is not

@@ -28,8 +28,13 @@ import (
 // asked for. So a value must be checked before the release that carries it, not
 // discovered at the height.
 //
-// BaseApp reports the stored parameters to CometBFT at the end of every
-// FinalizeBlock, so the new values bind from the block after the upgrade height.
+// When the values bind. BaseApp reports the stored parameters to CometBFT at the
+// end of every FinalizeBlock, so CometBFT builds and checks blocks under them from
+// the block after the upgrade height; max_bytes, which only CometBFT enforces,
+// binds from there. max_gas binds one block earlier inside the application: after
+// the handler, x/upgrade reports ConsensusParamsChanged and BaseApp rebuilds the
+// block gas meter and re-reads the per-transaction limit, so the upgrade block's
+// own transactions are already held to the new max_gas.
 func SetBlockParams(ctx sdk.Context, k consensuskeeper.Keeper, maxBytes, maxGas int64) error {
 	stored, err := k.ParamsStore.Get(ctx)
 	if err != nil {
