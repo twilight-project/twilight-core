@@ -7,7 +7,7 @@ title: Localnet Drills
 Every end-to-end target in the `Makefile`. Each localnet target starts its own
 throwaway network (four nodes unless noted), exercises it, and stops it. Most drive it
 with real signed transactions and check cross-node app-hash agreement after the
-transition under test; the rows say which do not. None of them runs in CI; the first five
+transition under test; the rows say which do not. None of them runs in CI; the first six
 [chain-free checks](#chain-free-checks) at the end are the part that does.
 
 Homes can be isolated, but ports are fixed by node index, and several drills stop every
@@ -75,7 +75,7 @@ funded-fixture caveat that applies to every localnet.
 
 ## Chain-free checks
 
-Fast, and no network is started. The first five run in CI's *build & test* job.
+Fast, and no network is started. The first six run in CI's *build & test* job.
 
 | Target | Proves |
 |---|---|
