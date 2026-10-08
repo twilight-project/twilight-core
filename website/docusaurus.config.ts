@@ -77,6 +77,8 @@ const config: Config = {
         redirects: [
           { from: "/chain/release-readiness", to: "/chain/status-and-validation" },
           { from: "/reference/validation-reports", to: "/chain/status-and-validation" },
+          // The mutability reference was merged into the single parameters page.
+          { from: "/reference/params-reference", to: "/rewards/params" },
         ],
       },
     ],

@@ -73,7 +73,6 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "reference/rewards-query-api", label: "Rewards Query API" },
         { type: "doc", id: "reference/rewards-tx-api", label: "Rewards Tx API" },
         { type: "doc", id: "reference/genesis-reference", label: "Genesis Reference" },
-        { type: "doc", id: "reference/params-reference", label: "Params Reference" },
         { type: "doc", id: "reference/module-accounts", label: "Module Accounts" },
       ],
     },

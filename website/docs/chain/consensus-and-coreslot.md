@@ -25,16 +25,21 @@ key with power zero plus the new key with active power in one atomic EndBlock.
 
 Genesis defines a **normal authority** and a separate **emergency authority**:
 
-- Normal authority controls registration, activation, removal, rotation, and
-  CoreSlot params.
-- Emergency authority can **suspend** an active slot.
-- Operators can update their own payout address and metadata, and may
-  self-inactivate while preserving `MinActiveSlots`.
+- The authority controls registration, activation, inactivation, removal and
+  consensus-key rotation, sets CoreSlot params, can suspend a slot, and is the only
+  account that can schedule or cancel an on-chain upgrade.
+- The emergency authority can **suspend** a slot and pause or resume rewards.
+- Either authority is handed over only by nomination and acceptance; `update-params`
+  refuses a changed authority field.
+- Operators update their own payout address, settlement address, metadata and
+  selection policy, and may self-inactivate as long as the active set stays at or
+  above `min_active_slots` afterwards.
 
-These same two authorities govern the rewards module: rewards params updates are
-authorized by the CoreSlot **authority**, and rewards pause/resume by the CoreSlot
-**emergency authority**. Rewards stores no authority of its own — see
-[Rewards parameters](../rewards/params.md).
+These same two accounts govern the rewards module: a rewards params update is signed
+by the **authority** (and can change little — see [Parameters](../rewards/params.md)),
+pause and resume by the **emergency authority**. Rewards stores no authority of its
+own. The whole control surface is on
+[Security & Failure Modes](../rewards/security-and-failure-modes.md#authority-model).
 
 ## Slot lifecycle and statuses
 
