@@ -79,6 +79,9 @@ const config: Config = {
           { from: "/reference/validation-reports", to: "/chain/status-and-validation" },
           // The mutability reference was merged into the single parameters page.
           { from: "/reference/params-reference", to: "/rewards/params" },
+          // The rewards-only query and tx references were folded into the CLI reference.
+          { from: "/reference/rewards-query-api", to: "/reference/cli" },
+          { from: "/reference/rewards-tx-api", to: "/reference/cli" },
         ],
       },
     ],

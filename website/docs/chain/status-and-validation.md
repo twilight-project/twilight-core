@@ -31,7 +31,8 @@ Each behavior below is exercised by the evidence type named next to it.
 | Entitlement release — over-release rejection, release against a missing entitlement, and payment to the snapshotted payout address | keeper tests and integration drills |
 | Settlement end to end — an epoch's entitlement released to participants by chunk, then finalized with the remainder returned to the operator | application-level end-to-end test with exact economics |
 | Rewards accounting identity — treasury, released rewards, unreleased entitlements, and carry-forward reconcile to cumulative emitted supply | invariant tests checked against real module, treasury, and payout balances |
-| Export / import determinism of full application state | application-level round-trip test |
+| Genesis export / import round trip: a populated genesis (non-default state, a queued params update; no closed epoch) exported through the app's module manager byte-for-byte and re-imported with its state preserved | application-level round-trip test |
+| An export of a running chain is complete (archive, entitlements, liability, supply, escrow) and is refused by the fresh-genesis importer, naming the closed-epoch state | application-level test |
 | Local multi-node epoch finalization, with cross-node app-hash agreement | four-node localnet validation |
 | Long-run determinism and exact accounting over many epochs on a zero-premine chain | endurance soak testing |
 | Cross-host fault tolerance — peer loss, network partition, and quorum-loss safe-halt, each with recovery | fault-tolerance drills on a live multi-host network |
@@ -44,6 +45,10 @@ Each behavior below is exercised by the evidence type named next to it.
 - **Not mainnet-ready.** This is a public testnet; any network carrying value
   requires an external audit and further deployment validation beyond what is
   listed above.
+- **An export of a running chain cannot be re-imported.** `twilightd export` is
+  complete, but every Twilight module's importer accepts only a fresh genesis; a continuation
+  importer is deferred. Recovery is from a node's own data and backups, never from an
+  export. See [Upgrade & Export/Import](../operators/upgrade-and-export-import.md#an-export-cannot-be-re-imported-by-this-binary).
 - **Multi-day cross-host endurance is not yet done.** Cross-host coverage to date
   is the fault-tolerance drills above plus single-host endurance soak; a sustained
   multi-day run across hosts is still pending.

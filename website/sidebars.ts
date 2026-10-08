@@ -56,6 +56,8 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         { type: "doc", id: "operators/node-operator-guide", label: "Node Operator Guide" },
+        { type: "doc", id: "operators/validator-operations", label: "Validator Operations" },
+        { type: "doc", id: "operators/keys-backup-and-recovery", label: "Keys, Backup & Recovery" },
         { type: "doc", id: "operators/coreslot-operator-guide", label: "CoreSlot Operator Guide" },
         { type: "doc", id: "operators/rewards-operator-guide", label: "Rewards Operator Guide" },
         { type: "doc", id: "operators/authority-and-emergency-guide", label: "Authority & Emergency" },
@@ -69,9 +71,7 @@ const sidebars: SidebarsConfig = {
       label: "Reference",
       collapsed: true,
       items: [
-        { type: "doc", id: "reference/cli", label: "CLI" },
-        { type: "doc", id: "reference/rewards-query-api", label: "Rewards Query API" },
-        { type: "doc", id: "reference/rewards-tx-api", label: "Rewards Tx API" },
+        { type: "doc", id: "reference/cli", label: "CLI & Queries" },
         { type: "doc", id: "reference/genesis-reference", label: "Genesis Reference" },
         { type: "doc", id: "reference/module-accounts", label: "Module Accounts" },
       ],

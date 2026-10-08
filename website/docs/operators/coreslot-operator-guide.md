@@ -6,7 +6,9 @@ title: CoreSlot Operator Guide
 
 CoreSlot is the PoA validator authority. This guide covers what an operator needs
 to know about how their slot relates to rewards; the consensus model is in
-[Consensus & CoreSlot](../chain/consensus-and-coreslot.md).
+[Consensus & CoreSlot](../chain/consensus-and-coreslot.md), and the procedures —
+admission, the slot lifecycle, key rotation, changing your addresses — are on
+[Validator Operations](validator-operations.md).
 
 ## A slot's reward-relevant fields
 

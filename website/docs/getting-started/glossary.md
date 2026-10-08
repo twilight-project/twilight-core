@@ -10,6 +10,8 @@ title: Glossary
 | **Active slot** | A slot with status `SLOT_STATUS_ACTIVE` — part of the validator set and eligible to earn rewards active-block credit. |
 | **Operator address** | The account that operates a slot. |
 | **Payout address** | The account that receives a slot's rewards. Snapshotted into each entitlement at finalization. |
+| **Settlement address** | The account that signs a slot's participant payouts (settlement chunks) and may finalize its settlements early. Set at registration or in genesis, changed by the operator; mandatory for every slot. |
+| **Consensus key** | The ed25519 key a validator node signs blocks with (`config/priv_validator_key.json` or a remote signer). Rotated by an authority transaction; a retired key is locked out from reuse for `consensus_key_reuse_lockout` blocks. |
 | **Reward weight** | Operator reward-weight metadata held by CoreSlot for forward compatibility; never read by rewards. It is separate from consensus power and is not used for reward allocation. |
 | **Consensus power** | A slot's CometBFT voting power; drives validator updates only; never used for reward accounting. |
 | **Epoch** | A fixed window of `epoch_length_blocks` blocks over which active blocks accumulate and at whose end rewards finalize. |
@@ -23,7 +25,7 @@ title: Glossary
 | **Settlement** | The `x/mining` process that releases an entitlement: participants are paid by chunk, and finalization returns the remainder to the snapshotted payout. |
 | **Authority** | The CoreSlot account that decides the validator set, sets CoreSlot params, schedules on-chain upgrades, and can queue a rewards params update. Handed over only by nomination and acceptance. |
 | **Emergency authority** | The CoreSlot account that can pause and resume rewards (one canonical state, effective at H+1) and suspend a slot. |
-| **Module account** | `rewards` (Minter; holds minted emission and unreleased entitlements) and `rewards_fee_pool` (dormant, no permissions). |
+| **Module account** | One of five keyless accounts declared in `app/config.go`: `rewards` (the only minter; holds minted emission and unreleased entitlements), `rewards_fee_pool` (dormant), `fee_collector` (the SDK's fee destination; receives any fee a sender attaches, and nothing pays out of it), `coreslot-authority` (the authority the SDK modules are bound to, and the default genesis's placeholder authority) and `coreslot-emergency` (the default genesis's placeholder emergency authority). All are refused as payees. |
 | **`utwlt`** | The native base denom — the only accounting denom. |
 | **`twlt` / `TWLT`** | Display denom / symbol — metadata only. |
 | **Treasury** | An optional external address receiving a configured share of emission; default share is zero. |
