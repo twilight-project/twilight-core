@@ -44,7 +44,8 @@ turns it into one.
 `twilightd init` writes an `app_state` with six sections: `auth`, `bank`, `upgrade`
 (empty), and the three Twilight modules below. `consensus` has no `app_state` section;
 the consensus parameters, including `block.max_gas`, are the file's top-level
-`consensus.params`.
+`consensus.params`. After launch, only an upgrade can change them (see
+[Changing block parameters](../operators/upgrade-and-export-import.md#changing-block-parameters)).
 
 The "Validate" column is what the module's own genesis validation enforces on a fresh
 genesis. `make check-genesis` (below) requires more of a launch file; those extra

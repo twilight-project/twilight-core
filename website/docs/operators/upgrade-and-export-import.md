@@ -77,6 +77,15 @@ open settlement window. Nothing expires while the network is down, however long 
   It stops accrual and release together and freezes the settlement clock, which gives a
   quiescent state to migrate from.
 
+### Changing block parameters
+
+`block.max_gas` and `block.max_bytes` cannot be changed by any transaction: the consensus
+module's authority is a keyless account. On a running network they change only inside a
+named upgrade, whose handler sets them (`app.SetBlockParams`), so a new value is scheduled,
+halts every validator at the same height and takes effect from the next block, like any
+other state-machine change. A release that changes `max_bytes` also says what mempool bound
+operators should set, since a node's `config.toml` does not follow the change.
+
 ### What is proven, and what is not
 
 The mechanism is covered by application tests and by a four-validator localnet drill

@@ -165,6 +165,23 @@ genesis. Either may be a k-of-n multisig account with **no chain change at all**
 normal authority at a higher threshold than the emergency authority — deliberate versus fast —
 is an operational choice this decision endorses but does not encode.
 
+### 7. Block parameters change only through an upgrade handler
+
+*Added 2026-10-08 ([#170](https://github.com/twilight-project/twilight-core/issues/170)).*
+`x/consensus` is bound to the same keyless authority account as `x/upgrade`, so no
+transaction can change `block.max_gas` or `block.max_bytes`
+([#167](https://github.com/twilight-project/twilight-core/issues/167)). The consensus keeper
+is passed to upgrade handlers (`MigrationKeepers.Consensus`), and `app.SetBlockParams` sets the
+block section with CometBFT's own validation, leaving every other section as stored. Changing a
+block parameter on a running network is therefore a named, scheduled, coordinated upgrade like
+any other state-machine change.
+
+The alternative was a CoreSlot message that forwards `x/consensus`'s `MsgUpdateParams`, as
+`ScheduleUpgrade` forwards `x/upgrade`. It would allow retuning without a halt, but it would
+give the authority key a standing power over consensus parameters and widen what a stolen
+authority key can do. It is not adopted; it can be revisited if live retuning proves
+operationally necessary.
+
 ## Consequences
 
 **A consensus-affecting upgrade always halts the chain.** This decision does not remove that;

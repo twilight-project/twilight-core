@@ -14,6 +14,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
@@ -72,10 +73,21 @@ type Upgrade struct {
 // It matters most for the value-critical modules: the fail-closed reasoning below
 // is about outstanding entitlement liability, which lives in rewards, not in
 // CoreSlot.
+//
+// Consensus was added after v0.3.0 (#170). Adding a field is not a signature
+// change: Migrate keeps the type func(sdk.Context, MigrationKeepers) error, and
+// every released entry compiles and behaves exactly as it did, so the
+// append-only rule is untouched.
 type MigrationKeepers struct {
 	CoreSlot coreslotkeeper.Keeper
 	Rewards  rewardskeeper.Keeper
 	Mining   miningkeeper.Keeper
+	// Consensus is the only route to block parameters on a running network. Its
+	// authority is a keyless module account, so no transaction can sign for it,
+	// and CoreSlot deliberately does not proxy it (#170, option A): changing
+	// max_gas or max_bytes is a named, scheduled, coordinated upgrade. Write
+	// through SetBlockParams rather than the store, so upstream's validation runs.
+	Consensus consensuskeeper.Keeper
 }
 
 // Upgrades is the live registry.
@@ -191,9 +203,7 @@ func ValidateUpgrades(upgrades []Upgrade) error {
 func registerUpgradeHandlers(
 	runtimeApp *runtime.App,
 	upgradeKeeper *upgradekeeper.Keeper,
-	coreSlot coreslotkeeper.Keeper,
-	rewards rewardskeeper.Keeper,
-	mining miningkeeper.Keeper,
+	keepers MigrationKeepers,
 ) {
 	// Fail at construction rather than at the upgrade height. A malformed registry
 	// is a property of the binary, so every node carrying it is wrong in the same
@@ -201,7 +211,6 @@ func registerUpgradeHandlers(
 	if err := ValidateUpgrades(Upgrades); err != nil {
 		panic(err)
 	}
-	keepers := MigrationKeepers{CoreSlot: coreSlot, Rewards: rewards, Mining: mining}
 	for _, upgrade := range Upgrades {
 		upgrade := upgrade
 		upgradeKeeper.SetUpgradeHandler(
