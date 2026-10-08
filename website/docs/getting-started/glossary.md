@@ -10,6 +10,8 @@ title: Glossary
 | **Active slot** | A slot with status `SLOT_STATUS_ACTIVE` — part of the validator set and eligible to earn rewards active-block credit. |
 | **Operator address** | The account that operates a slot. |
 | **Payout address** | The account that receives a slot's rewards. Snapshotted into each entitlement at finalization. |
+| **Settlement address** | The account that signs a slot's participant payouts (settlement chunks) and may finalize its settlements early. Installed and changed by the operator; mandatory for every slot. |
+| **Consensus key** | The ed25519 key a validator node signs blocks with (`config/priv_validator_key.json` or a remote signer). Rotated by an authority transaction; a retired key is locked out from reuse for `consensus_key_reuse_lockout` blocks. |
 | **Reward weight** | Operator reward-weight metadata held by CoreSlot for forward compatibility; never read by rewards. It is separate from consensus power and is not used for reward allocation. |
 | **Consensus power** | A slot's CometBFT voting power; drives validator updates only; never used for reward accounting. |
 | **Epoch** | A fixed window of `epoch_length_blocks` blocks over which active blocks accumulate and at whose end rewards finalize. |

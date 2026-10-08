@@ -19,9 +19,9 @@ const cards: Card[] = [
   },
   {
     tag: "Validators",
-    title: "CoreSlots",
-    desc: "What a validator slot is: its operator and payout addresses, its status, and how it relates to rewards.",
-    to: "/operators/coreslot-operator-guide",
+    title: "Become a validator",
+    desc: "Admission by the authority, the slot lifecycle, key rotation, and what you can change about your slot.",
+    to: "/operators/validator-operations",
   },
   {
     tag: "Integrators",

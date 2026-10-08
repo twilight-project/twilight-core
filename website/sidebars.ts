@@ -56,6 +56,8 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         { type: "doc", id: "operators/node-operator-guide", label: "Node Operator Guide" },
+        { type: "doc", id: "operators/validator-operations", label: "Validator Operations" },
+        { type: "doc", id: "operators/keys-backup-and-recovery", label: "Keys, Backup & Recovery" },
         { type: "doc", id: "operators/coreslot-operator-guide", label: "CoreSlot Operator Guide" },
         { type: "doc", id: "operators/rewards-operator-guide", label: "Rewards Operator Guide" },
         { type: "doc", id: "operators/authority-and-emergency-guide", label: "Authority & Emergency" },
