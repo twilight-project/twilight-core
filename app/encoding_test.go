@@ -3,6 +3,7 @@ package app_test
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,20 +55,57 @@ func TestEveryChainMsgResolvesFromTheClientCodec(t *testing.T) {
 	require.GreaterOrEqual(t, checked, 16, "the manifest should cover every custom message")
 }
 
-// TestCustomMsgsMarshalThroughTheLegacyAminoCodec covers the second registration
-// the same absent pass would have performed.
+// TestTheManifestListsExactlyTheTwilightMsgsTheChainRegisters closes the other
+// direction. The test above proves every listed message resolves; it cannot see a
+// message the manifest leaves out, and that is how the three authority-rotation
+// messages went missing while every gate stayed green (#69).
 //
-// Amino needs the concrete-name registration to encode a value held as an
-// interface, which is how a transaction carries a message. Without it the failure
-// is "cannot encode unregistered concrete type" at signing time, far from its
-// cause.
-//
-// x/coreslot is deliberately absent from this table and the omission is not an
-// oversight to be tidied away: its RegisterLegacyAminoCodec is EMPTY, and its
-// protos declare one amino.name across eleven messages. That gap is inside the
-// module and predates this fix — registering the client codec cannot invent names
-// the module never assigned — so it is reported separately rather than papered
-// over with a skipped assertion here.
+// The registered set comes from the client codec; every Twilight entry must also have
+// a handler in the app's message router, so the chain can execute it. The manifest's bank entries are a deliberate subset and are not compared here;
+// tools/msgmanifest checks them against the bank Msg service when it generates.
+func TestTheManifestListsExactlyTheTwilightMsgsTheChainRegisters(t *testing.T) {
+	raw, err := os.ReadFile("../docs/proto/twilight-msg-type-urls.json")
+	require.NoError(t, err)
+
+	var manifest struct {
+		Modules map[string][]string `json:"modules"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &manifest))
+
+	listed := map[string]bool{}
+	for module, urls := range manifest.Modules {
+		for _, url := range urls {
+			require.Falsef(t, listed[url], "%s is listed twice", url)
+			listed[url] = true
+			if module != "bank" {
+				require.Truef(t, strings.HasPrefix(url, "/twilight."),
+					"module %s lists %s, which is not a Twilight message", module, url)
+			}
+		}
+	}
+
+	registered := map[string]bool{}
+	for _, url := range app.MakeEncodingConfig().InterfaceRegistry.ListImplementations(sdk.MsgInterfaceProtoName) {
+		if strings.HasPrefix(url, "/twilight.") {
+			registered[url] = true
+		}
+	}
+	require.NotEmpty(t, registered, "the client codec registers no Twilight messages")
+
+	router := newApp(t).MsgServiceRouter()
+	for url := range registered {
+		require.Truef(t, listed[url],
+			"%s is registered but missing from the manifest; run make proto-descriptor", url)
+	}
+	for url := range listed {
+		if !strings.HasPrefix(url, "/twilight.") {
+			continue
+		}
+		require.Truef(t, registered[url], "%s is in the manifest but not registered", url)
+		require.NotNilf(t, router.HandlerByTypeURL(url), "%s is in the manifest but the chain has no handler for it", url)
+	}
+}
+
 func TestCustomMsgsMarshalThroughTheLegacyAminoCodec(t *testing.T) {
 	encoding := app.MakeEncodingConfig()
 

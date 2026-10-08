@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-block-gas-drill block-gas-faults check-genesis check-genesis-faults localnet-load-calibration localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill upgrade-drill-faults localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-block-gas-drill block-gas-faults check-genesis check-genesis-faults localnet-load-calibration localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -268,6 +268,11 @@ localnet-authority-rotation-drill:
 localnet-upgrade-drill:
 	./scripts/localnet/upgrade-drill.sh
 
+# Fast, chain-free negative tests for every predicate in the upgrade drill that can
+# decide PASS. No chain, about a second.
+upgrade-drill-faults:
+	./scripts/localnet/upgrade-drill-faults.sh
+
 # The whole validator-set behaviour study.
 validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
 
@@ -306,9 +311,13 @@ drill-restart-rotation:
 drill-quorum:
 	./scripts/localnet/quorum-drill.sh
 
+# Stops at the first drill that fails. The three used to be joined with `;`, so the
+# recipe's status was quorum-drill's alone and a failed lifecycle or restart-rotation
+# drill still left `make drills` green. A failed drill can also leave a node behind
+# that the next drill refuses to start beside, so continuing would not add evidence.
 drills:
 	@RUN_ID="$${RUN_ID:-$$(date -u +%Y%m%d-%H%M%S)-$$$$}"; \
 	export RUN_ID; \
-	./scripts/localnet/lifecycle-e2e.sh; \
-	./scripts/localnet/restart-rotation.sh; \
+	./scripts/localnet/lifecycle-e2e.sh && \
+	./scripts/localnet/restart-rotation.sh && \
 	./scripts/localnet/quorum-drill.sh

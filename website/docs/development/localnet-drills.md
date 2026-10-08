@@ -39,7 +39,7 @@ funded-fixture caveat that applies to every localnet.
 
 | Target | Covers |
 |---|---|
-| `make drills` | the three drills below, in sequence |
+| `make drills` | the three drills below, in sequence, stopping at the first that fails |
 | `make drill-lifecycle` | register, activate, inactivate, suspend, remove and rotate through the CLI, checking after every action that its block carries exactly the expected number of validator updates |
 | `make drill-restart-rotation` | rotate an active validator's key, restart the node on the new key, and prove it rejoins at full power while the old key holds none |
 | `make drill-quorum` | by stopping nodes rather than by transactions: lose one of four validators and continue; lose two and halt without forking; restart and resume. An offline validator keeps its slot and its power |
@@ -84,6 +84,7 @@ Fast, and no network is started. The first five run in CI's *build & test* job.
 | `make release-upgrade-faults` | the release rehearsal's readers fail on bad input instead of reporting success |
 | `make block-gas-faults` | the same for the block-gas tooling |
 | `make check-genesis-faults` | every genesis check fires on its own fault |
+| `make upgrade-drill-faults` | every upgrade-drill predicate that can decide a pass fails on bad input |
 | `make localnet-export-restore-faults` | the export-restore drill's outcome classifiers |
 | `make check-release-stamping` | a release binary's version stamp, including the dirty-tree marker; needs a clean tree |
 

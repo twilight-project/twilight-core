@@ -31,6 +31,9 @@
       "/twilight.coreslot.v1.MsgUpdateSettlementAddress",
       "/twilight.coreslot.v1.MsgUpdateSelectionPolicy",
       "/twilight.coreslot.v1.MsgUpdateParams",
+      "/twilight.coreslot.v1.MsgNominateAuthority",
+      "/twilight.coreslot.v1.MsgAcceptAuthority",
+      "/twilight.coreslot.v1.MsgCancelAuthorityNomination",
       "/twilight.coreslot.v1.MsgScheduleUpgrade",
       "/twilight.coreslot.v1.MsgCancelUpgrade"
     ],
