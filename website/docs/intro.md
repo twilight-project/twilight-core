@@ -61,4 +61,4 @@ only** (6 decimals) and never appear in accounting state.
 - **Understanding the design:** [Architecture](chain/architecture.md), the
   [Rewards overview](rewards/overview.mdx) and [Settlement](rewards/settlement.md).
 - **Contributing:** [Contributing](development/contributing.md) and
-  [Localnet Drills](development/localnet-drills.md).
+  [Localnet & Drills](development/localnet-drills.md).

@@ -15,12 +15,12 @@ Top-level layout of `twilight-core`.
 | `internal/` | Shared packages: overflow-checked arithmetic (`checked`), the economic-address rule (`economicaddress`), the pinned query contract (`queryapi`), protocol-vector packs (`consensusvectors`), and source-derived ledgers of error codes and payout accounts. |
 | `cmd/twilightd/` | The `twilightd` binary and root command (`cmd/twilightd/cmd/root.go`). |
 | `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`, `twilight.mining.v1`). |
-| `scripts/localnet/` | The localnet harness (`init`, `start`, `stop`, `agree`, `lib/`) and every smoke, drill and soak; see [Localnet Drills](localnet-drills.md). |
+| `scripts/localnet/` | The localnet harness (`init`, `start`, `stop`, `agree`, `lib/`) and every smoke, drill and soak; see [Localnet & Drills](localnet-drills.md). |
 | `scripts/` | Proto generation, the descriptor export, release builds, the genesis verifier, the vulnerability scan, consensus vectors and the API smokes. |
 | `tools/dashboard/` | A small read-only web dashboard that decodes CoreSlot and rewards state over CometBFT RPC; a separate binary from `twilightd` (`go build ./tools/dashboard`). |
 | `docs/` | Architecture decisions (`architecture/adr/`), operator, security and testing records, and the descriptor set for offline transaction decoding (`proto/`). |
 | `website/` | This documentation site (separate from the Go build). |
-| `Makefile` | Build, test, lint, proto and every localnet target; [Localnet Drills](localnet-drills.md) lists them. |
+| `Makefile` | Build, test, lint, proto and every localnet target; [Localnet & Drills](localnet-drills.md) lists them. |
 
 ## `x/rewards/` internals
 

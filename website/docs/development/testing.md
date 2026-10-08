@@ -5,7 +5,7 @@ title: Testing
 # Testing
 
 What to run, and which layer covers which risk. The end-to-end targets are on
-[Localnet Drills](localnet-drills.md); the repository's testing records are under
+[Localnet & Drills](localnet-drills.md); the repository's testing records are under
 `docs/testing/` (the validation summary, the CoreSlot test plan, the module
 simulations and the drill reports).
 

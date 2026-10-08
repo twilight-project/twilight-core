@@ -19,7 +19,8 @@ export NODE=tcp://127.0.0.1:26657
 Each epoch, the chain mints a `utwlt` pool and allocates it to the active slots by the
 blocks each was active for. Each slot's share is held in escrow as a per-slot
 entitlement; there is no claim transaction. Settlement in `x/mining` releases it,
-paying participants and returning the remainder to the slot's payout address (see
+paying participants and returning the remainder to the payout address snapshotted
+when the epoch closed (see
 [Settlement](../rewards/settlement.md)). Your job is to confirm each epoch finalizes
 correctly, that settlement keeps up, and to respond to pauses and faults.
 
@@ -27,15 +28,17 @@ correctly, that settlement keeps up, and to respond to pauses and faults.
 
 1. **Epoch advanced:** `epoch-info` shows `state.current_epoch` incremented.
 2. **Emission correct:** `epoch-reward <closed-epoch>` shows a `minted_emission` equal
-   to the block subsidy times the epoch's reward-enabled blocks, and
-   `cumulative-emitted` advanced by that amount.
+   to the block subsidy times its `reward_enabled_blocks` (except in an epoch that
+   crosses a halving threshold or reaches the cap, where the subsidy changes
+   mid-epoch), and `cumulative-emitted` advanced by that amount.
 3. **Allocation reconciles:** `allocated_amount` (the sum of the epoch's entitlements)
    plus `carry_out` equals the epoch's `reward_pool`.
 4. **Escrow covers the liability:** right after a finalization, `module-balances`
    shows `rewards_balance` equal to `outstanding_entitlement_liability` plus
    `carry_forward_remainder`.
 5. **Nodes agree** (on a multi-node network): every node reports the same app hash at
-   the same height.
+   the same height; see
+   [Check status and agreement](node-operator-guide.md#check-status-and-agreement).
 
 ```bash
 twilightd rewards-query epoch-info --node "$NODE"
@@ -50,16 +53,20 @@ Add `--output json` for machine-readable output.
 
 ## Settlement keeping up
 
-Each slot's open settlements, and the deadline each must be finalized by, are on
-[Settlement](../rewards/settlement.md):
+These show a slot's open settlements and, for each, its `deadline_clock`,
+`current_settlement_clock` and `permissionless_finalization_now`;
+[Settlement](../rewards/settlement.md) explains the deadline:
 
 ```bash
 twilightd mining-query open-settlements <slot-id> --node "$NODE"
 twilightd mining-query settlement <slot-id> <epoch> --node "$NODE"
 ```
 
-A settlement that passes its deadline can be finalized by anyone, which releases the
-remainder to the slot's payout address.
+Once the settlement clock reaches a settlement's `deadline_clock`
+(`permissionless_finalization_now: true`), any account may submit
+`finalize-settlement`. Nothing finalizes a settlement automatically, and nothing
+finalizes while rewards are paused. The remainder goes to the payout address
+snapshotted when the epoch closed.
 
 ## Halving
 
@@ -84,7 +91,8 @@ cumulative total stays below the cap (see
 
 A pause stops reward accrual and release together, from the next block. Epochs still
 advance and finalize; a fully paused epoch emits nothing. See
-[Transactions](../rewards/transactions.md) and the
+[Transactions](../rewards/transactions.md), the full table of pause effects on
+[Epoch Lifecycle](../rewards/epoch-lifecycle.md#pause-interactions), and the
 [Authority & Emergency Guide](authority-and-emergency-guide.md).
 
 ## When something looks wrong

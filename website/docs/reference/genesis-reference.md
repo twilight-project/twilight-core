@@ -25,7 +25,7 @@ precedes rewards, and mining comes last: it consumes both custom modules. Neithe
 rewards nor mining `InitGenesis` mints or sends; they only write state. Mining also
 rebuilds its derived indexes (the open-settlement index and the version indexes) from
 the rows it imported rather than importing them. Only `fee_collector` exists as a module
-account after InitGenesis; the others are created on first use (see
+account after a fresh InitGenesis; the others are created on first use (see
 [Module Accounts](module-accounts.md)).
 
 ## Inspecting the default genesis

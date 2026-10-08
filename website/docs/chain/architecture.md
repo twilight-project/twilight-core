@@ -73,10 +73,13 @@ graph LR
   enforced by rewards against the entitlement it owns, so a defect in mining cannot
   widen what leaves escrow.
 - **Mining reads CoreSlot** through `GetSlot` (the settlement address decides who may
-  submit a slot's chunks), `GetActiveSlots` and `SelectionPolicyAtHeight`.
+  submit a slot's chunks), and through `GetActiveSlots` and `SelectionPolicyAtHeight`
+  only for the genesis check that each ACTIVE slot's policy fits the selection
+  parameters.
 - **CoreSlot knows nothing** of rewards or mining.
 - Keepers take interface-typed dependencies (`AccountKeeper`, `BankKeeper`,
-  `CoreSlotKeeper`, `RewardsKeeper`): no concrete app imports and no cycles.
+  `CoreSlotKeeper`, `RewardsKeeper`, and CoreSlot's `UpgradeScheduler`): no concrete app
+  imports and no cycles.
 
 Because staking/distribution/slashing/governance are absent, there is no
 delegation, no proposer reward, no slashing penalty, and no on-chain governance

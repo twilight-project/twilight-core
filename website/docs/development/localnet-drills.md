@@ -34,6 +34,10 @@ make drills                         # lifecycle, restart-rotation and quorum dri
 
 ### What the epoch smoke produces
 
+`scripts/localnet/rewards-smoke.sh` edits only its own isolated genesis; production
+defaults are untouched. The epoch length is bounded to [360, 720] blocks and cannot be
+shortened, so the smoke closes a full 360-block epoch at a fast block time instead.
+
 | Stage | Result |
 |---|---|
 | Pre-finalization | epoch 1 open; 4 active-block rows; module balance 0; 4-node hash agreement |
@@ -57,7 +61,9 @@ monetary-genesis run is a separate case — see
 `scripts/localnet/agree.sh` queries every node and verifies they agree on the
 **app hash**, **validators hash**, and **next-validators hash** at a common
 height. App-hash divergence is the catastrophic failure it guards against — a
-silent state fork. The smokes run this check after each state transition.
+silent state fork. The epoch smoke runs it before and after finalization; `localnet-smoke` and the
+settlement smoke run it once, at the end; most drills run it after the transition they
+test.
 
 ## Validator set
 

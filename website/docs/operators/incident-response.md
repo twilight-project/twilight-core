@@ -19,12 +19,13 @@ on [Security & Failure Modes](../rewards/security-and-failure-modes.md).
 | Mint is zero at the boundary | rewards were paused for the epoch, or the subsidy has floored to zero near the cap | `rewards-query pause-state`; `rewards-query next-halving` (`current_block_subsidy`) |
 | `cumulative_emitted` not advancing | rewards are paused | [Rewards paused unexpectedly](#rewards-paused-unexpectedly) |
 | Releases failing for everyone | rewards are paused | [Releases failing for everyone](#releases-failing-for-everyone) |
-| One release rejected | the epoch is not finalized, there is no entitlement, or the amount exceeds what remains | `rewards-query epoch-reward <epoch>`; `rewards-query entitlement <slot-id> <epoch>`; [Settlement](../rewards/settlement.md) |
+| One release rejected | the epoch is not finalized, there is no entitlement, or the amount exceeds what remains | `mining-query settlement <slot-id> <epoch>` (`remaining_amount`, `deadline_clock`, `permissionless_finalization_now`); `rewards-query entitlement <slot-id> <epoch>`; every check a chunk must pass is on [Settlement](../rewards/settlement.md) |
 | Params update rejected | a field no transaction may change, an unsupported feature, or the wrong signer | [Parameters: what update-params rejects](../rewards/params.md#what-update-params-rejects) |
 | Wrong params queued | — | [Wrong params queued](#wrong-params-queued) |
 | `pause` or `resume` rejected | not signed by the emergency authority | sign with the CoreSlot emergency authority |
 | Escrow below what it owes | an accounting defect | [Module-balance coverage failure](#module-balance-coverage-failure) |
-| A key is lost or exposed | — | [Key compromise](#key-compromise) |
+| A key is exposed | — | [Key compromise](#key-compromise) |
+| A key is lost | — | [What each key controls, and what to do if it is lost](../rewards/security-and-failure-modes.md#what-each-key-controls-and-what-to-do-if-it-is-lost) |
 | Paging returns an empty `next_key` | the last page | normal; stop paging |
 
 ## App-hash divergence across nodes (critical)
