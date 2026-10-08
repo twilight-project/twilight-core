@@ -16,7 +16,7 @@ make build
 ## 2. Run the rewards localnet
 
 ```bash
-make localnet-rewards-smoke
+make localnet-rewards-epoch-smoke
 ```
 
 This starts a four-node network with a 360-block rewards epoch at a fast block
@@ -28,7 +28,9 @@ caveat).
 
 ## 3. Query rewards state
 
-Against a running node (default first-node RPC `tcp://127.0.0.1:26657`):
+The smoke stops its network when it finishes. To query, start one with
+`make localnet-init` and `scripts/localnet/start.sh`, then use the first node's RPC
+(`tcp://127.0.0.1:26657`); stop it with `scripts/localnet/stop.sh`:
 
 ```bash
 twilightd rewards-query params --node tcp://127.0.0.1:26657

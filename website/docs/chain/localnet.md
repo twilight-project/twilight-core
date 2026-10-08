@@ -4,8 +4,11 @@ title: Localnet
 
 # Localnet
 
-Two four-node smoke targets exist. They cover different things — do not
-conflate them.
+Three four-node smoke targets cover different things, so do not conflate them:
+`localnet-smoke` (startup and agreement), `localnet-rewards-epoch-smoke` (an epoch
+closes and creates entitlements) and `localnet-settlement-smoke` (settlement pays them
+out). The first two are described here; every target, including the settlement smoke
+and the drills, is on [Localnet Drills](../development/localnet-drills.md).
 
 ## `make localnet-smoke` (default)
 
@@ -35,7 +38,8 @@ before and after finalization.
 This is **not a money-movement proof**. It closes an epoch and checks the
 obligation the epoch produced; it submits no settlement chunk, so no value is
 released. The transaction that releases participant value is
-`MsgSubmitSettlementChunk` in `x/mining`.
+`MsgSubmitSettlementChunk` in `x/mining`, and `make localnet-settlement-smoke` is the run
+that submits it.
 
 ```bash
 make localnet-rewards-epoch-smoke
