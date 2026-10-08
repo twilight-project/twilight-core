@@ -33,7 +33,7 @@ The standard commands are the usual Cosmos ones: `init`, `start`, `export`, `key
 `validate`, `snapshots`, `prune`, `rollback`, `add-genesis-account`, `tx bank send`,
 `query bank balances`, `query auth …`, `query upgrade …`, plus the genesis helpers
 `coreslot-genesis add | set-authorities | validate`
-([Genesis Reference](genesis-reference.md#building-a-launch-genesis)).
+([Genesis](genesis-reference.md#building-a-launch-genesis)).
 
 The 41 query commands are a **pinned surface**: a hand-written table in the repository
 (`internal/queryapi/contract.go`) names every command, the request it builds and the RPC
@@ -94,6 +94,24 @@ and over gRPC (`9090`), which is canonical.
 | `reward-config-version` | `[version]` or `epoch:N` | one version by its number, or the version that became effective at exactly epoch N (`NotFound` for any other epoch; it does not resolve which version governs an epoch) | `/reward-config-version?version=` or `?effective_epoch=` |
 | `epoch-config-versions` | — (paginated) | the epoch-configuration history, plus a windowed list of scheduled entries | `/epoch-config-versions` |
 | `pause-state` | — | `pause_state` (`current_paused`, `has_pending`, `pending_value`, `pending_effective_height`) and `release_enabled` | `/pause-state` |
+
+#### Reading the rewards answers
+
+- **`epoch-info`** → `state.current_epoch`, `current_epoch_start_height`,
+  `current_epoch_end_height`, `current_epoch_length_blocks`, `open_reward_enabled_blocks`,
+  `has_pending_params`. At an epoch's closing height `current_epoch` is still that epoch:
+  the next one opens at the following BeginBlock.
+- **`epoch-reward`** → `epoch_reward.minted_emission`, `reward_pool`, `allocated_amount`,
+  `carry_out`, `cumulative_emitted_after_epoch`. The embedded `rewards[]` is always
+  empty; the obligation an epoch creates is a slot entitlement.
+- **`entitlement`** → `entitlement_amount`, `released_amount`, `payout_address`; what is
+  still owed is the difference, and [settlement](../rewards/settlement.md) is what releases it.
+- **`pause-state`** → `pause_state.current_paused`, `has_pending`, `pending_value`,
+  `pending_effective_height`, and `release_enabled`, which is what settlement checks.
+  Never read the deprecated enable flags in `params` for this.
+- **`module-balances`** → `rewards_balance` must cover
+  `outstanding_entitlement_liability + carry_forward_remainder`; the invariant that
+  enforces it is on [Invariants](../rewards/invariants.md).
 
 ### `mining-query`
 

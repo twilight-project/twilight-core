@@ -1,8 +1,8 @@
 ---
-title: Localnet Drills
+title: Localnet & Drills
 ---
 
-# Localnet Drills
+# Localnet & Drills
 
 Every end-to-end target in the `Makefile`. Each localnet target starts its own
 throwaway network (four nodes unless noted), exercises it, and stops it. Most drive it
@@ -32,8 +32,32 @@ make drills                         # lifecycle, restart-rotation and quorum dri
 | `make api-smoke` | the REST and Swagger routes, against a throwaway network with REST enabled and a seeded consensus-address reservation |
 | `make localnet-init`, `make localnet-agree` | build a network without starting it; check agreement on one that is already running |
 
-[Localnet](../chain/localnet.md) shows what the epoch smoke produces and the
-funded-fixture caveat that applies to every localnet.
+### What the epoch smoke produces
+
+| Stage | Result |
+|---|---|
+| Pre-finalization | epoch 1 open; 4 active-block rows; module balance 0; 4-node hash agreement |
+| After finalization | epoch advances to 2; minted `149,828,400utwlt` (= 360 × 416,190); 4 entitlements × `37,457,100utwlt`; escrow holds the full emission; carry 0; 4-node hash agreement |
+
+The minted emission is **per block over the epoch** (`360 × 416,190`), not per
+slot — distribution then splits the minted pool across the 4 active slots. See
+[Rewards economics](../rewards/economics.mdx).
+
+:::warning Funded development fixture
+The rewards smoke runs on a **funded** development fixture (the localnet funds two
+accounts with `1,000,000,000,000utwlt` each, so total supply after finalization is
+`2,000,149,828,400utwlt`). It exercises deterministic rewards behavior and exact
+supply accounting **under that fixture**. A production **zero-premine**
+monetary-genesis run is a separate case — see
+[Status & Validation](../chain/status-and-validation.md).
+:::
+
+### The agreement check
+
+`scripts/localnet/agree.sh` queries every node and verifies they agree on the
+**app hash**, **validators hash**, and **next-validators hash** at a common
+height. App-hash divergence is the catastrophic failure it guards against — a
+silent state fork. The smokes run this check after each state transition.
 
 ## Validator set
 
@@ -68,7 +92,7 @@ funded-fixture caveat that applies to every localnet.
 | Target | Covers |
 |---|---|
 | `make localnet-export-restore-drill` | after two epochs and a settlement: an export taken mid-epoch, a restore attempt classified as refused-as-designed, supported or defect, and a fresh node joining |
-| `make check-genesis GENESIS=…` | verifies a genesis file before it is distributed, against launch decisions passed as `GC_*` variables (it refuses to infer them); see [Genesis](../chain/genesis.md) |
+| `make check-genesis GENESIS=…` | verifies a genesis file before it is distributed, against launch decisions passed as `GC_*` variables (it refuses to infer them); see [Genesis](../reference/genesis-reference.md) |
 | `make localnet-block-gas-drill` | a network with a finite `block.max_gas` under flood: the ceiling holds, the excess is deferred rather than dropped, and blocks keep coming. The ceiling is a drill constant, not a production value |
 | `make localnet-load-calibration` | the measurement a `block.max_gas` value would be chosen from; targets an existing network and writes machine-readable results; when the measurement qualifies it reports a candidate value for human review. It ratifies nothing |
 | `make localnet-rewards-soak` | runs until `SOAK_EPOCHS` epochs (default 3) of 360 blocks have closed, asserting determinism and accounting at the boundaries. Along the way it does an emergency pause and resume, an authority params update (`SOAK_EPOCHS` of at least 5 to see it activate) and a node restart (at least 5). `PREMINE=off` empties the genesis balances, so supply rises only from emission. No settlement |

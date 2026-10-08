@@ -61,8 +61,8 @@ Toggle the single canonical pause state. There are no per-area selectors: pausin
 stops reward accrual and release together.
 
 ```bash
-twilightd rewards pause  --from <emergency-authority> ...
-twilightd rewards resume --from <emergency-authority> ...
+twilightd rewards pause  --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
+twilightd rewards resume --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
 ```
 
 A transition accepted in block H takes effect at the beginning of H+1, before any

@@ -102,7 +102,7 @@ twilightd export --home <node-home> --output-document state.json
 ```
 
 This exports the full app state via the module manager's export path, every module in
-the same shape as genesis ([Genesis Reference](../reference/genesis-reference.md)).
+the same shape as genesis ([Genesis](../reference/genesis-reference.md)).
 Beyond what a launch genesis holds, an export of a running chain carries:
 
 - `rewards`: the finalized epoch aggregates, every slot entitlement with its released

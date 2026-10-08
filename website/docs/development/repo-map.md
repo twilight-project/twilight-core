@@ -51,4 +51,4 @@ Top-level layout of `twilight-core`.
 | `keeper/msg_server.go` / `query_server.go` | Msg handlers and the read-only query server. |
 | `types/selectionv1/` | The frozen byte and arithmetic contracts of Participant Selection V1. |
 
-See [Module Map](module-map.md) for the lifecycle/dependency view.
+See [Architecture](../chain/architecture.md) for the module boundaries, lifecycle order and dependencies.

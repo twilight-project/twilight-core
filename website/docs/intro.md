@@ -47,9 +47,18 @@ only** (6 decimals) and never appear in accounting state.
 
 ## Start here
 
-- **[Getting Started](getting-started/overview.md)** — install, run a localnet,
-  and query rewards.
-- **[Rewards overview](rewards/overview.mdx)** — how block rewards are minted,
-  allocated, and released.
-- **[Chain architecture](chain/architecture.md)** — the PoA design and module
-  layout.
+- **New to the chain:** [Install](getting-started/install.md) to build `twilightd`, the
+  [Quickstart](getting-started/quickstart.md) to run a localnet and query it,
+  [Chain concepts](getting-started/chain-concepts.md) for the mental model, and the
+  [Glossary](getting-started/glossary.md).
+- **Running a node:** the [Node Operator Guide](operators/node-operator-guide.md), then
+  [Monitoring](operators/monitoring.md) and
+  [Upgrade & Export/Import](operators/upgrade-and-export-import.md).
+- **Running a validator:** [Validator Operations](operators/validator-operations.md) and
+  [Keys, Backup & Recovery](operators/keys-backup-and-recovery.md).
+- **Building on the chain:** the [Integrator Guide](reference/integrators.md), then
+  [CLI & Queries](reference/cli.md) and [Events](reference/events.md).
+- **Understanding the design:** [Architecture](chain/architecture.md), the
+  [Rewards overview](rewards/overview.mdx) and [Settlement](rewards/settlement.md).
+- **Contributing:** [Contributing](development/contributing.md) and
+  [Localnet Drills](development/localnet-drills.md).

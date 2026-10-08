@@ -102,6 +102,14 @@ const config: Config = {
           { from: "/reference/rewards-tx-api", to: "/reference/cli" },
           // The rewards-only events page became the events reference for all modules.
           { from: "/rewards/events", to: "/reference/events" },
+          // Duplicate page pairs collapsed into one page each (#238, item 10).
+          { from: "/getting-started/overview", to: "/intro" },
+          { from: "/chain/localnet", to: "/development/localnet-drills" },
+          { from: "/chain/genesis", to: "/reference/genesis-reference" },
+          { from: "/development/module-map", to: "/chain/architecture" },
+          { from: "/rewards/operator-runbook", to: "/operators/rewards-operator-guide" },
+          { from: "/rewards/troubleshooting", to: "/operators/incident-response" },
+          { from: "/rewards/queries", to: "/reference/cli" },
         ],
       },
     ],

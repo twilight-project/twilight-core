@@ -1,12 +1,45 @@
 ---
-title: Genesis Reference
+title: Genesis
 ---
 
-# Genesis Reference
+# Genesis
 
 What a Twilight genesis file contains, what the binary writes by default, what a fresh
-genesis must satisfy, and how a launch genesis is built and checked. For the module
-initialization order see [Chain → Genesis](../chain/genesis.md).
+genesis must satisfy, and how a launch genesis is built and checked.
+
+A launch genesis is expected to be zero-premine: total supply rises only through epoch
+emission. The localnet fixtures fund accounts and are not a production genesis (see
+[Localnet fixtures](#localnet-fixtures-not-production)).
+
+## Module init order
+
+`InitGenesis` runs in this order (set in `app/config.go`):
+
+```text
+upgrade → auth → bank → consensus → coreslot → rewards → mining
+```
+
+`upgrade` goes first; it carries no state in the genesis file and only records each
+module's consensus version, which a later upgrade handler migrates from. CoreSlot
+precedes rewards, and mining comes last: it consumes both custom modules. Neither
+rewards nor mining `InitGenesis` mints or sends; they only write state. Mining also
+rebuilds its derived indexes (the open-settlement index and the version indexes) from
+the rows it imported rather than importing them. Only `fee_collector` exists as a module
+account after InitGenesis; the others are created on first use (see
+[Module Accounts](module-accounts.md)).
+
+## Inspecting the default genesis
+
+```bash
+twilightd init <moniker> --chain-id <chain-id>
+jq '.app_state.coreslot' ~/.twilightd/config/genesis.json
+jq '.app_state.rewards' ~/.twilightd/config/genesis.json
+jq '.app_state.mining' ~/.twilightd/config/genesis.json
+```
+
+A default genesis is not a launch genesis: it names keyless module accounts as both
+authorities and holds no slots. [Building a launch genesis](#building-a-launch-genesis)
+turns it into one.
 
 `twilightd init` writes an `app_state` with six sections: `auth`, `bank`, `upgrade`
 (empty), and the three Twilight modules below. `consensus` has no `app_state` section;
@@ -49,8 +82,10 @@ requirements are listed after the tables.
 | `slot_entitlements` | `SlotEntitlement[]` | Must be empty |
 | `outstanding_entitlement_liability` | string (int) | Must be `"0"` |
 
-The default genesis has no premine: `cumulative_emitted` is `"0"` and total supply rises
-only through emission.
+The default genesis has no premine: `cumulative_emitted` is `"0"`, it adds no balances,
+and total supply rises only through emission. It holds no pending params, no finalized
+epochs and no entitlements, and `current_epoch_config` is the snapshot built from
+`params`.
 
 ## `mining`
 
@@ -64,6 +99,12 @@ only through emission.
 | `last_processed_reward_epoch` | uint64 | Must be 0 |
 | `settlement_epoch_anchors` | `SettlementEpochAnchor[]` | Must be empty |
 | `settlements` | `Settlement[]` | Must be empty |
+
+The default mining genesis describes a trusted-distribution chain whose first epoch is
+1: one version in each history, effective from epoch 1 — the distribution mode
+(`TRUSTED_AS_DISTRIBUTION`), the settlement parameters (window 2 epochs, 32 recipients per
+chunk, 4 chunks per settlement, minimum payout `10000utwlt`) and the selection
+parameters — with nothing scheduled and the clock and cursor at zero.
 
 ## What `make check-genesis` requires beyond `Validate`
 
@@ -137,3 +178,10 @@ liability and open-reward-enabled block count, settlements and their anchors, a 
 settlement clock and cursor, pending key rotations; and pending authority transfers,
 which `Validate` accepts but `make check-genesis` refuses. See
 [Upgrade & Export/Import](../operators/upgrade-and-export-import.md#exporting-state).
+
+## Localnet fixtures (not production)
+
+The localnet `init.sh` funds the authority and emergency accounts with
+`1,000,000,000,000utwlt` each and registers four active CoreSlots. That is a funded
+development fixture, not the zero-premine genesis a launch uses. See
+[Localnet & Drills](../development/localnet-drills.md).
