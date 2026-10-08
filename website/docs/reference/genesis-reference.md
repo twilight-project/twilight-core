@@ -130,7 +130,7 @@ it. It ends with an emission projection that is informational, not a genesis val
 
 `twilightd export` writes every module's state in the same shape as genesis, and it is
 complete: every monetary fact of the chain is in it. But **this binary cannot re-import
-an export of a running chain** — every module's importer accepts only a fresh genesis,
+an export of a running chain** — every Twilight module's importer accepts only a fresh genesis,
 and a continuation importer is deferred. An export is a record, not a restore path. It
 carries what a launch file must not: finalized epochs, slot entitlements, a non-zero
 liability and open-reward-enabled block count, settlements and their anchors, a non-zero

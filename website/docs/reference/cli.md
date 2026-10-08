@@ -4,9 +4,11 @@ title: CLI Reference
 
 # CLI Reference
 
-Every custom-module command is reachable two ways: under a **top-level group** with
-short, stable names, which this site uses throughout, and under the SDK's generated
-`query <module>` / `tx <module>` tree, whose names follow the RPC names. Both reach the
+Most custom-module commands are reachable two ways: under a **top-level group** with
+short, stable names, which this site uses throughout, and under the SDK's
+`query <module>` / `tx <module>` tree. The `query` trees are generated and follow the RPC
+names; `tx coreslot` is the same hand-written tree mounted a second time, so its names
+match; `tx mining` and `coreslot-genesis` exist in one place only. Both forms reach the
 same handlers.
 
 | Top-level group | Generated equivalent | Contents |
@@ -19,9 +21,10 @@ same handlers.
 | — | `tx mining` | 2 settlement transactions; there is no top-level group for them |
 
 Where the generated names differ: `query coreslot active-core-slots` is
-`coreslot-query active`, `core-slot` is `slot`, `core-slot-by-operator` and
-`core-slot-by-consensus-address` are `by-operator` and `by-consensus`,
-`pending-key-rotations` is `pending-rotations`, `reserved-consensus-address` is
+`coreslot-query active`, `core-slot` is `slot`, `core-slots` is `slots`,
+`core-slot-by-operator` and `core-slot-by-consensus-address` are `by-operator` and
+`by-consensus`, `pending-key-rotations` is `pending-rotations`,
+`last-applied-validators` is `last-applied`, `reserved-consensus-address` is
 `reserved`; `query rewards current-epoch-active-blocks` is `current-active-blocks`,
 `slot-entitlement` is `entitlement`, `slot-entitlements-by-epoch` is
 `epoch-entitlements`, `rewards-pause-state` is `pause-state`.
@@ -44,8 +47,8 @@ cannot be added, removed or rewired without a deliberate change to that table.
 | `--node <rpc>` | every command that talks to a node | CometBFT RPC endpoint (default `tcp://localhost:26657`) |
 | `--output json` (`-o json`) | queries | Machine-readable output; the default is YAML-style text |
 | `--height <h>` | queries | Read state at a past height (a pruning node may refuse) |
-| `--from <key>`, `--chain-id`, `--gas`, `--fees 0utwlt`, `--broadcast-mode sync\|async`, `-y` | transactions | Standard Cosmos transaction flags; the chain requires no fee |
-| `--limit`, `--offset`, `--page`, `--page-key`, `--reverse`, `--count-total` | the paginated queries below | Standard pagination; follow `pagination.next_key` until it is empty. `open-settlements` refuses `--count-total` (counting a canonical collection is unbounded work) |
+| `--from <key>`, `--chain-id`, `--gas`, `--fees 0utwlt`, `--broadcast-mode sync\|async`, `-y` | transactions | Standard Cosmos transaction flags; no fee is required by default (each node's own minimum gas price, `0utwlt` as shipped) |
+| `--limit`, `--page-key` | the queries marked paginated below | `--limit` is capped at 100. `epoch-entitlements`, `reward-config-versions`, `open-settlements` and the three mining version lists accept **only** these two; `--offset`, `--page`, `--reverse` and `--count-total` are refused as `InvalidArgument` (counting a canonical collection is unbounded work). `current-active-blocks` and `epoch-config-versions` accept all six. The command line cannot pass a binary `next_key` back as `--page-key`, so page beyond the first page over REST (`pagination.key=<next_key>`) or gRPC |
 
 The same queries are served over REST on the API server (default port `1317`,
 `[api] enable = true`; routes below, Swagger at `/swagger/` when `api.swagger` is on)
@@ -59,7 +62,7 @@ and over gRPC (`9090`), which is canonical.
 |---|---|---|---|
 | `params` | — | the CoreSlot `Params` record ([Parameters](../rewards/params.md#coreslot)) | `/params` |
 | `slot` | `[slot-id]` | one slot | `/slots/{slot_id}` |
-| `slots` | — | every slot, any status | `/slots` (REST adds a `status` filter and pagination) |
+| `slots` | — | up to 100 slots, any status; beyond that page over REST | `/slots` (REST adds a `status` filter by enum number, e.g. `?status=2`, and pagination) |
 | `active` | — | the ACTIVE slots | `/active-slots` |
 | `by-operator` | `[address]` | the slot an operator address owns | `/operators/{operator_address}` |
 | `by-consensus` | `[hex-address]` | the slot behind a consensus address (hex) | `/consensus/{consensus_address}` |
@@ -80,7 +83,7 @@ and over gRPC (`9090`), which is canonical.
 | `epoch-info` | — | the open epoch: `state`, `current_epoch_config`, `current_epoch_start_height`, `current_epoch_end_height`, `current_epoch_length_blocks`, `open_reward_enabled_blocks`, `has_pending_params`, `pending_params` | `/epoch-info` |
 | `epoch-boundaries` | `[epoch]` | an epoch's `start_height`, `end_height`, `epoch_length_blocks` | `/epochs/{epoch_number}/boundaries` |
 | `epoch-reward` | `[epoch]` | the finalized aggregate (`minted_emission`, `carry_in`, `treasury_amount`, `reward_pool`, `allocated_amount`, `carry_out`, `cumulative_emitted_after_epoch`; `rewards[]` is always empty); `NotFound` until the epoch is finalized | `/epochs/{epoch_number}` |
-| `next-halving` | — | `current_tier`, `current_block_subsidy`, `next_threshold`, `remaining_until_next_halving`, `has_next_halving` | `/next-halving` |
+| `next-halving` | — | under `info`: `current_tier`, `current_block_subsidy`, `next_threshold`, `remaining_until_next_halving`, `has_next_halving` | `/next-halving` |
 | `cumulative-emitted` | — | `cumulative_emitted`, `max_supply` | `/cumulative-emitted` |
 | `supply-schedule` | — | `params` plus the next-halving view | `/supply-schedule` |
 | `current-active-blocks` | — (paginated) | the open epoch's active-block counters, ascending slot id | `/current-epoch/active-blocks` |
@@ -88,8 +91,8 @@ and over gRPC (`9090`), which is canonical.
 | `entitlement` | `[slot-id] [epoch]` | one slot entitlement: amount, released amount, snapshotted payout address | `/slots/{slot_id}/entitlements/{epoch}` |
 | `epoch-entitlements` | `[epoch]` (paginated) | an epoch's entitlements, ascending slot id | `/epochs/{epoch}/entitlements` |
 | `reward-config-versions` | — (paginated) | the reward-configuration history, plus any scheduled entry | `/reward-config-versions` |
-| `reward-config-version` | `[version]` or `epoch:N` | one version by number, or the version that binds epoch N | `/reward-config-version?version=` or `?effective_epoch=` |
-| `epoch-config-versions` | — (paginated) | the epoch-configuration history, plus any scheduled entry | `/epoch-config-versions` |
+| `reward-config-version` | `[version]` or `epoch:N` | one version by its number, or the version that became effective at exactly epoch N (`NotFound` for any other epoch; it does not resolve which version governs an epoch) | `/reward-config-version?version=` or `?effective_epoch=` |
+| `epoch-config-versions` | — (paginated) | the epoch-configuration history, plus a windowed list of scheduled entries | `/epoch-config-versions` |
 | `pause-state` | — | `pause_state` (`current_paused`, `has_pending`, `pending_value`, `pending_effective_height`) and `release_enabled` | `/pause-state` |
 
 ### `mining-query`
@@ -111,10 +114,12 @@ and over gRPC (`9090`), which is canonical.
 
 ### Errors
 
-Every query classifies its failures the same way, on gRPC and the CLI:
+Every query classifies its failures by one rule, on gRPC and REST:
 
-- a missing, zero or malformed argument, or an offset and a page key supplied together →
-  `InvalidArgument`;
+- input the handler validates and refuses — a non-hex consensus address, a zero epoch or
+  slot on the rewards and mining queries, an offset and a page key supplied together, a
+  disallowed pagination flag — → `InvalidArgument`. The CoreSlot lookups do not validate
+  their arguments, so a zero id or a malformed address there is simply `NotFound`;
 - a record that does not exist (an epoch not yet finalized, a slot id or address with no
   slot, a version that was never created) → `NotFound`; an empty list is a success, not a
   `NotFound`;
@@ -122,7 +127,11 @@ Every query classifies its failures the same way, on gRPC and the CLI:
   naming a missing record — → `Internal`, never `NotFound` and never `Unknown`: a client
   that sees `Internal` is looking at a damaged node, not an absent object.
 
-REST maps `InvalidArgument` to 400, `NotFound` to 404 and `Internal` to 500.
+`validate-economic-address` is the exception by design: any input is a success with
+`admissible` and a `rejection_reason`. On the command line, an argument the CLI cannot
+parse (a non-number where a number is expected, a missing positional) is refused locally
+before any request is sent and carries no gRPC code. REST maps `InvalidArgument` to 400,
+`NotFound` to 404 and `Internal` to 500.
 
 ## Transactions
 
@@ -164,5 +173,5 @@ and when it takes effect, is on the
 
 | Command | Flags | Signer |
 |---|---|---|
-| `submit-settlement-chunk` | `--slot-id`, `--epoch`, `--chunk-index`, `--payouts <json>` (one `{"recipient","amount"}` object per line; repeatable) | the slot's settlement address |
+| `submit-settlement-chunk` | `--slot-id`, `--epoch`, `--chunk-index`, `--payouts <json>` (one `{"recipient","amount"}` object per `--payouts`; repeat the flag for each recipient) | the slot's settlement address |
 | `finalize-settlement` | `--slot-id`, `--epoch` | the settlement address before the deadline; any account from the deadline on ([Settlement](../rewards/settlement.md#finalization)) |

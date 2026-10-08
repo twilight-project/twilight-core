@@ -46,7 +46,7 @@ Each behavior below is exercised by the evidence type named next to it.
   requires an external audit and further deployment validation beyond what is
   listed above.
 - **An export of a running chain cannot be re-imported.** `twilightd export` is
-  complete, but every module's importer accepts only a fresh genesis; a continuation
+  complete, but every Twilight module's importer accepts only a fresh genesis; a continuation
   importer is deferred. Recovery is from a node's own data and backups, never from an
   export. See [Upgrade & Export/Import](../operators/upgrade-and-export-import.md#an-export-cannot-be-re-imported-by-this-binary).
 - **Multi-day cross-host endurance is not yet done.** Cross-host coverage to date

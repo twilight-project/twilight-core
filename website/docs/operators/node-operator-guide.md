@@ -164,10 +164,11 @@ the node and run `twilightd comet unsafe-reset-all --home ~/.twilightd`. This wi
 the chain databases, zeroes `data/priv_validator_state.json` and deletes the address
 book (`config/addrbook.json`), but keeps your keys and configuration, so
 `persistent_peers` in `config.toml` still names your peers. Then replace
-`config/genesis.json` with the new document and start again. That is the only
-situation it is for: never run it to "fix" a validator on a live chain — a zeroed
-`priv_validator_state.json` on a chain the key has already signed is how a validator
-double-signs.
+`config/genesis.json` with the new document and start again. Apart from a validator
+rebuilding a lost data directory ([Keys, Backup & Recovery](keys-backup-and-recovery.md#recovery-paths)),
+that is the only situation it is for: never run it on a validator that still has its
+data on a live chain — the zeroed `priv_validator_state.json` removes the guard that
+stops the key signing a height it has already signed.
 
 If the new genesis also carries a new chain-id, update `chain-id` in
 `config/client.toml`. Nothing rewrites it after the first `init`, and the CLI signs
@@ -209,13 +210,13 @@ rewards module is fail-closed and will halt the block on a finalization fault (s
 
 | Symptom | Likely cause | Check or fix |
 |---|---|---|
-| Node won't start | a config file that does not parse; a port already in use; an invalid genesis | the error names the TOML key or the port; `twilightd validate-genesis` |
+| Node won't start | a config file that does not parse; a port already in use; an invalid genesis; a validator with no `data/priv_validator_state.json` | the error says what failed to parse (not always where) or which port; `twilightd validate-genesis`; for a missing state file see [Keys, Backup & Recovery](keys-backup-and-recovery.md#recovery-paths) |
 | Won't sync: height stays at 0 or well behind, `catching_up: true` for good | wrong genesis or chain-id for the network; no reachable peer (`persistent_peers` must name one that is up; where peer exchange is disabled, a node that knows one peer depends on it for everything) | compare `jq .chain_id config/genesis.json` and the genesis hash with another node; `curl localhost:26657/net_info \| jq .result.n_peers` |
 | Stopped at a height every other node passed; the log repeats an upgrade name | an on-chain upgrade reached its height and this node runs the old binary | `twilightd query upgrade plan`; install the release the plan names and restart ([Upgrade & Export/Import](upgrade-and-export-import.md)) |
 | Halts right after a restart with `BINARY UPDATED BEFORE TRIGGER` | the new binary was started before the upgrade height | run the previous release until the height, then swap |
 | Halts at a height with an EndBlock error | a rewards or settlement finalization fault — fail-closed by design | inspect the log line; see [Security & Failure Modes](../rewards/security-and-failure-modes.md) and [Incident Response](incident-response.md) |
 | App-hash divergence against peers | **critical**: a state fork or a corrupt node | stop; do not restart from a different binary; see [Incident Response](incident-response.md) |
 | Empty validator set at InitChain | the genesis has fewer than `min_active_slots` ACTIVE slots | add them with `coreslot-genesis add` ([building a genesis](../reference/genesis-reference.md#building-a-launch-genesis)) |
-| A validator misses a few blocks right after its restart | the restart landed mid-height and the signer refused to sign a step it had already signed until the chain passed it — correct double-sign protection | wait; roll the next validator only when this one signs again |
+| A validator misses a few blocks right after its restart | the restart landed mid-height; a signer, a remote one in particular, may refuse to sign again at a height and round it has already signed — double-sign protection, not a fault | wait; roll the next validator only when this one signs again |
 | `creating account … requires at least 10000utwlt in a single transfer` | the chain refuses to create a new account with less than the minimum funding, since an account is permanent state | send at least `10000utwlt` in one transfer, or send to an existing account |
-| Disk grows without bound | default pruning keeps every height | set `pruning` and `min-retain-blocks` in `app.toml` on nodes that do not need history; `twilightd prune` reclaims past heights |
+| Disk grows without bound | `min-retain-blocks = 0` (the default) keeps every block in the CometBFT store; application state under `pruning = "default"` keeps the last 362,880 heights | set `min-retain-blocks` and `pruning` in `app.toml` on nodes that do not need history; `twilightd prune` prunes application state with the method given on its command line, not from `app.toml` |

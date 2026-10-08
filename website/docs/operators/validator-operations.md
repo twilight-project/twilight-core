@@ -14,20 +14,24 @@ commands are on the [CLI Reference](../reference/cli.md#coreslot).
 ## Becoming a validator
 
 Run a full node first ([Node Operator Guide](node-operator-guide.md#joining-an-existing-network)),
-then give the authority four things:
+then give the authority five things:
 
 - your **operator address** — the account that will sign your slot's own
   transactions (payout, settlement address, metadata, policy, self-inactivation);
-- a **payout address** — where each epoch's remainder is released; snapshotted into every
-  entitlement at the epoch's close, so a change affects later epochs only;
+- a **payout address** — where each epoch's remainder is released; snapshotted at each
+  epoch's close, after that block's transactions, so a change applies to every epoch that
+  closes after it, the one in progress included;
 - a **settlement address** — the account that signs your slot's participant payouts
   ([Settlement](../rewards/settlement.md#chunks)). It is mandatory and has no default,
   and it carries the same exposure as the entitlements it can pay out: custody it as a
   hot operational credential, separate from the operator key if you can;
-- your node's **consensus public key**, base64: `twilightd comet show-validator | jq -r .key`.
+- your node's **consensus public key**, base64: `twilightd comet show-validator | jq -r .key`
+  — unless a remote signer holds the key, in which case take the public key from the
+  signer; `show-validator` prints the unused key in the node's own file;
+- a **moniker**.
 
-Any of the three addresses may be the same account; a module account is refused for any
-of them. The authority then registers and activates the slot:
+Any of the three addresses may be the same account; a module account is refused as the
+payout or settlement address. The authority then registers and activates the slot:
 
 ```bash
 twilightd coreslot register <operator> <payout> <settlement> <consensus-pubkey-base64> <moniker> \
@@ -64,7 +68,7 @@ stateDiagram-v2
 | Register | `coreslot register …` | authority | `PENDING`, power 0; not in the validator set |
 | Activate | `coreslot activate <slot-id>` | authority | from `PENDING`, `INACTIVE` or `SUSPENDED` to `ACTIVE` at `slot_voting_power`; validator update at the next EndBlock; refused above `max_active_slots` |
 | Inactivate | `coreslot inactivate <slot-id> <reason>` | authority, or the slot's operator | from `ACTIVE` only; `INACTIVE`, power 0, out of the set at the next EndBlock; refused if the active set would drop below `min_active_slots` |
-| Suspend | `coreslot suspend <slot-id> <reason> <evidence-reference>` | authority or emergency authority | from any status but `SUSPENDED` or `REMOVED`; power 0 at the next EndBlock if it was active; the last active slot can never be suspended, and going below `min_active_slots` needs `allow_emergency_below_min_active`. Record the evidence reference: it is the on-chain pointer to why |
+| Suspend | `coreslot suspend <slot-id> <reason> <evidence-reference>` | authority or emergency authority | from any status but `SUSPENDED` or `REMOVED`; power 0 at the next EndBlock if it was active; the last active slot can never be suspended, and going below `min_active_slots` needs `allow_emergency_below_min_active`. The evidence reference lives in the transaction only — not in the slot record or the event — so keep the transaction hash with your incident record |
 | Remove | `coreslot remove <slot-id> <reason>` | authority | from `PENDING`, `INACTIVE` or `SUSPENDED` — an active slot must be inactivated or suspended first; terminal; the consensus key is reserved for `consensus_key_reuse_lockout` blocks |
 
 Two things survive every transition. First, **credit already earned is still paid**: a
@@ -90,17 +94,20 @@ policy; all are refused once the slot is suspended or removed.
 ## Rotating your consensus key
 
 Rotation is signed by the **authority** (`coreslot rotate-key <slot-id> <new-consensus-pubkey-base64>`),
-so ask for it with the new public key. For an active slot the switch is applied at the
-EndBlock of the request height plus `key_rotation_delay_blocks` (default 1): the old key
-leaves at power 0 and the new key enters at `slot_voting_power` in one atomic step. One
+so ask for it with the new public key. For an active slot the switch is applied in the
+EndBlock at the request height plus `key_rotation_delay_blocks` (default 1): the old key
+leaves at power 0 and the new key enters at `slot_voting_power` in one atomic update.
+Consensus applies a validator update two blocks after the EndBlock that emits it, so the
+old key still signs until then and the new key is the signer from that block on. One
 rotation can be pending at a time (`coreslot-query pending-rotations`). For a slot that
 is not active the record changes at once. The old key is reserved for
 `consensus_key_reuse_lockout` blocks (`coreslot-query reserved <hex-address>`).
 
-Your node must sign with the new key from the moment the switch applies, or it stops
-being a signer: generate the key pair in advance, keep the private half ready, and once
-the rotation is applied, stop the node, install the new key (replace
-`config/priv_validator_key.json`, or switch the remote signer's key), and start it. Leave
+Your node stops being a signer unless it signs with the new key from the block the
+update takes effect: generate the key pair in advance, keep the private half ready, and
+once the rotation shows as applied (`pending-rotations` empty), stop the node, install
+the new key (replace `config/priv_validator_key.json`, or switch the remote signer's
+key), and start it; expect to miss a block or two at the switch. Leave
 `data/priv_validator_state.json` in place — the chain is already past every height the
 old key signed, so there is no height regression. See
 [Keys, Backup & Recovery](keys-backup-and-recovery.md).
@@ -119,9 +126,9 @@ With four validators at equal power, any three keep producing blocks and two can
 the chain **halts safely** rather than forking or diverging. Recovery from a halt is not
 a transaction — the chain cannot commit one — but operational: bring the same validators
 back with the same keys and state, and the chain resumes from the last finalized height.
-A planned restart therefore waits for the others to be signing (the node guide's
-pre-flight), and a restart that lands mid-height can cost more than one block, because
-a remote signer refuses to sign a step it has already signed until the chain is past it.
+A planned restart therefore waits until the other validators are signing, and a restart
+that lands mid-height can cost more than one block, depending on the signer: a remote
+signer may refuse to sign again at a height and round it has already signed.
 
 ## Responding to evidence
 

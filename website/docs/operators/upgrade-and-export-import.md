@@ -117,7 +117,7 @@ Beyond what a launch genesis holds, an export of a running chain carries:
 
 The export is **complete**: every monetary fact of the chain — the finalized-epoch
 archive, every entitlement, the liability, the supply, the escrow — is in it, and a test
-asserts exactly that. But every module's importer accepts only a **fresh** genesis, and
+asserts exactly that. But every Twilight module's importer accepts only a **fresh** genesis, and
 refuses a document that carries closed-epoch state, naming it. A continuation importer,
 one that restarts a chain from an export of a running chain, is deferred, not written.
 So an export is a record for review and for a future continuation path, not a restore

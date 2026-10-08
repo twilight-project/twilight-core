@@ -25,7 +25,7 @@ the [CLI Reference](../reference/cli.md#rewards-query).
 | `module-balances` | — | What does the `rewards` escrow hold, what does it owe (`outstanding_entitlement_liability`), and what is carried forward? |
 | `entitlement` | `[slot-id] [epoch]` | What did slot S earn in epoch N, how much of it is released, and to which snapshotted payout address? |
 | `epoch-entitlements` | `[epoch]` (paginated) | All entitlements of epoch N |
-| `reward-config-versions`, `reward-config-version` | —; `[version]` or `epoch:N` | The reward-configuration history (subsidy, treasury), or the version binding an epoch |
+| `reward-config-versions`, `reward-config-version` | —; `[version]` or `epoch:N` | The reward-configuration history (subsidy, treasury), or one version by number or by the exact epoch it became effective at (which is not the epoch it governs: a version binds epochs two after it) |
 | `epoch-config-versions` | — (paginated) | The epoch-configuration history (epoch length) |
 | `pause-state` | — | Is accrual and release paused, is a transition pending, and may settlement release right now? |
 
@@ -44,17 +44,13 @@ twilightd rewards-query reward-config-version epoch:1 --node <rpc>
 ## Pagination
 
 `current-active-blocks`, `epoch-entitlements`, `reward-config-versions` and
-`epoch-config-versions` are paginated (their collections grow over time) and accept the
-standard flags:
-
-| Flag | Meaning |
-|---|---|
-| `--limit` | Max rows per page (default 100) |
-| `--offset` | Numeric offset |
-| `--page` | Page number (offset = page × limit) |
-| `--page-key` | Continuation key from a previous response's `next_key` |
-| `--count-total` | Include total count |
-| `--reverse` | Descending order |
+`epoch-config-versions` are paginated (their collections grow over time). All four take
+`--limit` (at most 100) and `--page-key`; `current-active-blocks` and
+`epoch-config-versions` also take `--offset`, `--page` (offset = (page − 1) × limit),
+`--count-total` and `--reverse`, which the other two refuse as `InvalidArgument` —
+counting or offsetting into a canonical collection is unbounded work. The command line
+cannot pass a binary `next_key` back as `--page-key`, so to read past the first page use
+REST (`pagination.key=<next_key>` from the previous response) or gRPC.
 
 The other commands take no pagination flags. Ordering is deterministic:
 `epoch-entitlements` returns ascending slot id within the requested epoch;
@@ -79,7 +75,7 @@ version. An offset and a page key supplied together are refused as `InvalidArgum
   `outstanding_entitlement_liability + carry_forward_remainder`; the invariant that
   enforces it is on [Invariants](invariants.md).
 
-Errors follow one classification on every query: a caller's mistake is
-`InvalidArgument`, an absent record is `NotFound` (an empty list is a success), and state
-that exists but cannot be read is `Internal` — see the
-[CLI Reference](../reference/cli.md#errors).
+Errors follow one classification on every query: input the handler validates and
+refuses (a zero epoch or slot, an offset with a page key) is `InvalidArgument`, an
+absent record is `NotFound` (an empty list is a success), and state that exists but
+cannot be read is `Internal` — see the [CLI Reference](../reference/cli.md#errors).
