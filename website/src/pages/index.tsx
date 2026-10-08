@@ -25,9 +25,9 @@ const cards: Card[] = [
   },
   {
     tag: "Integrators",
-    title: "Query the chain",
-    desc: "The command groups, and the gRPC and REST query surfaces with their OpenAPI spec.",
-    to: "/reference/cli",
+    title: "Build on the chain",
+    desc: "Endpoints, reading state, submitting transactions, transfer rules, and the events to index.",
+    to: "/reference/integrators",
   },
   {
     tag: "Concepts",

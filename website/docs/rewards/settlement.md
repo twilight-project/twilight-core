@@ -162,7 +162,8 @@ is the only way a version could be added.
 
 Events: `mining_settlement_chunk_submitted` (`slot_id`, `epoch`, `chunk_index`,
 `next_chunk_index`, `recipient_count`, `chunk_total`) and `mining_settlement_finalized`
-(`slot_id`, `epoch`, `finalization_reason`, `released_remainder`, `finalized_height`).
+(`slot_id`, `epoch`, `finalization_reason`, `released_remainder`, `finalized_height`);
+see [Events](../reference/events.md).
 
 The `x/rewards` side of the same obligation — the entitlement and its released amount —
 is read with `rewards-query entitlement <slot-id> <epoch>` and

@@ -42,7 +42,6 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "rewards/active-block-accounting", label: "Active-Block Accounting" },
         { type: "doc", id: "rewards/params", label: "Parameters" },
         { type: "doc", id: "rewards/invariants", label: "Invariants" },
-        { type: "doc", id: "rewards/events", label: "Events" },
         { type: "doc", id: "rewards/queries", label: "Queries" },
         { type: "doc", id: "rewards/transactions", label: "Transactions" },
         { type: "doc", id: "rewards/operator-runbook", label: "Operator Runbook" },
@@ -71,7 +70,9 @@ const sidebars: SidebarsConfig = {
       label: "Reference",
       collapsed: true,
       items: [
+        { type: "doc", id: "reference/integrators", label: "Integrator Guide" },
         { type: "doc", id: "reference/cli", label: "CLI & Queries" },
+        { type: "doc", id: "reference/events", label: "Events" },
         { type: "doc", id: "reference/genesis-reference", label: "Genesis Reference" },
         { type: "doc", id: "reference/module-accounts", label: "Module Accounts" },
       ],
