@@ -77,10 +77,10 @@ allocation (rewards). It is consensus-safety-critical:
   active-block participation, so changing a reward weight changes neither v1 payout
   nor any `ValidatorUpdate`.
 
-CoreSlot emits lifecycle events (e.g. `coreslot_validator_update_emitted` with
-`slot_id`, `operator_address`, `consensus_address`, `power`, `height`) that
-indexers and the rewards module can consume without touching the validator-set
-derivation path.
+CoreSlot emits an event from the transaction for every lifecycle transition, and one
+`coreslot_validator_update_emitted` per validator update in EndBlock. They are for
+indexers and monitoring; no module reads them, and the rewards module samples CoreSlot
+state directly. The full list is on [Events](../reference/events.md).
 
 ## Why staking is omitted
 

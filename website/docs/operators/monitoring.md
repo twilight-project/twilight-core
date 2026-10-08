@@ -383,5 +383,5 @@ paused, correlate with operator intent.
 
 Watch node logs for repeated EndBlock errors (a fail-closed finalization fault
 halts the block), for `epoch_finalized` events (see
-[Events](../rewards/events.md)), and for `telemetry snapshot could not be read`,
+[Events](../reference/events.md)), and for `telemetry snapshot could not be read`,
 which accompanies every increment of `twilight_telemetry_read_failures_total`.

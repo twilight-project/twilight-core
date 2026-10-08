@@ -82,6 +82,8 @@ const config: Config = {
           // The rewards-only query and tx references were folded into the CLI reference.
           { from: "/reference/rewards-query-api", to: "/reference/cli" },
           { from: "/reference/rewards-tx-api", to: "/reference/cli" },
+          // The rewards-only events page became the events reference for all modules.
+          { from: "/rewards/events", to: "/reference/events" },
         ],
       },
     ],
