@@ -43,6 +43,7 @@ consensus safety:
   | PreBlock | `upgrade`, `auth` |
   | BeginBlock | `rewards` (CoreSlot and mining have no BeginBlocker) |
   | EndBlock | `coreslot`, `rewards`, `mining` — the validator set is resolved first, then the epoch's accounting, then its settlement set |
+  | InitGenesis | `upgrade`, `auth`, `bank`, `consensus`, `coreslot`, `rewards`, `mining` |
 
 The block-by-block sequence, with a diagram, is on
 [Block Lifecycle](lifecycle.md).
@@ -51,17 +52,34 @@ The block-by-block sequence, with a diagram, is on
 
 Dependencies run one way, and nothing depends on mining:
 
+```mermaid
+graph LR
+    Rewards -->|reads active slots, slot records| CoreSlot
+    Rewards -->|mint / send utwlt| Bank
+    Rewards -->|module addresses| Auth
+    Mining -->|finalized epochs, entitlements, pause state; the two release calls| Rewards
+    Mining -->|slot records, settlement address, selection policy| CoreSlot
+    CoreSlot -->|validator updates| Runtime
+    CoreSlot -->|schedule / cancel a plan| Upgrade
+```
+
 - **Rewards reads CoreSlot** through four methods only: `GetActiveSlots`, `GetSlot`,
   `GetAuthority`, and `GetEmergencyAuthority`. It never writes CoreSlot state, never
   reads reward weight, and never reads consensus power for accounting.
 - **Mining reads rewards** through a narrow interface — the finalized epoch, its
-  entitlements, epoch geometry, the pause state — and calls exactly two methods that
-  move value: a participant payout against an entitlement and the release of its
-  remainder to the operator. Both are enforced by rewards against the entitlement it
-  owns, so a defect in mining cannot widen what leaves escrow.
-- **Mining reads CoreSlot** for a slot's record (its settlement address decides who
-  may submit chunks) and the active set.
+  entitlements, epoch start and end heights and length, and whether release is
+  enabled — and calls exactly two methods that move value: `PayEntitlement` (a
+  participant chunk) and `PayEntitlementRemainderToOperator` (finalization). Both are
+  enforced by rewards against the entitlement it owns, so a defect in mining cannot
+  widen what leaves escrow.
+- **Mining reads CoreSlot** through `GetSlot` (the settlement address decides who may
+  submit a slot's chunks), and through `GetActiveSlots` and `SelectionPolicyAtHeight`
+  only for the genesis check that each ACTIVE slot's policy fits the selection
+  parameters.
 - **CoreSlot knows nothing** of rewards or mining.
+- Keepers take interface-typed dependencies (`AccountKeeper`, `BankKeeper`,
+  `CoreSlotKeeper`, `RewardsKeeper`, and CoreSlot's `UpgradeScheduler`): no concrete app
+  imports and no cycles.
 
 Because staking/distribution/slashing/governance are absent, there is no
 delegation, no proposer reward, no slashing penalty, and no on-chain governance
@@ -71,11 +89,5 @@ authority is the only account that can schedule an on-chain upgrade.
 
 ## Where things live
 
-| Path | Contents |
-|---|---|
-| `app/` | App wiring (`app.go`), module/account config (`config.go`), the upgrade-handler registry (`upgrades.go`), params (`params/`). |
-| `x/coreslot/` | CoreSlot module (PoA validator authority). |
-| `x/rewards/` | Rewards module (emission, epochs, entitlements, the release boundary, params, invariants). |
-| `x/mining/` | Settlement module (settlement clock, materialization, chunks, finalization, parameter histories). |
-| `cmd/twilightd/` | The `twilightd` node + CLI binary. |
-| `scripts/localnet/` | Localnet init/start/agree/stop + smoke, soak, and drill scripts. |
+The directory layout, and the files inside `x/rewards` and `x/mining`, are on
+[Repo Map](../development/repo-map.md).

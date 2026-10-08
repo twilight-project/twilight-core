@@ -39,7 +39,8 @@
   /* Foreground */
   --tw-fg-primary:   #f0f0f2;
   --tw-fg-secondary: #9898a8;
-  --tw-fg-muted:     #606070;
+  /* 4.69:1 or better on every dark background token (WCAG AA is 4.5:1). */
+  --tw-fg-muted:     #85859a;
   --tw-fg-disabled:  #404050;
 
   /* Borders */
@@ -144,7 +145,8 @@
   --tw-bg-hover:     rgba(0, 0, 0, 0.04);
   --tw-fg-primary:   #09090b;
   --tw-fg-secondary: #52525b;
-  --tw-fg-muted:     #a1a1aa;
+  /* 4.75:1 or better on every light background token. */
+  --tw-fg-muted:     #67676f;
   --tw-border:       rgba(0, 0, 0, 0.08);
   --tw-border-strong:rgba(0, 0, 0, 0.14);
   --tw-accent:       #c026d3;

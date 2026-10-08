@@ -40,7 +40,7 @@ go vet ./...
 ```
 
 See [Testing](../development/testing.md) for which test layer covers which risk,
-and [Localnet](../chain/localnet.md) to run a multi-node network.
+and [Localnet & Drills](../development/localnet-drills.md) to run a multi-node network.
 
 :::note
 The documentation site (this site) is built separately under `website/` with

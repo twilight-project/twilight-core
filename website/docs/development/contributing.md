@@ -37,7 +37,7 @@ one exception is a fix merged from a security advisory's private fork; see `REVI
 
 | CI check | Run locally |
 |---|---|
-| build & test | `go build ./...` and `go test -count=1 ./...`, plus the first six chain-free checks on [Localnet Drills](localnet-drills.md#chain-free-checks) |
+| build & test | `go build ./...` and `go test -count=1 ./...`, plus the first six chain-free checks on [Localnet & Drills](localnet-drills.md#chain-free-checks) |
 | consensus vectors | `make consensus-vectors` |
 | golangci-lint | `make lint` (CI pins v2.12.2 and fails only on issues new to the PR) |
 | gofmt & tidy | `gofmt -l` finds nothing outside `website/` (`make fmt` rewrites the files), and `go mod tidy` leaves `go.mod`/`go.sum` unchanged |

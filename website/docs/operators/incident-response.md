@@ -4,9 +4,29 @@ title: Incident Response
 
 # Incident Response
 
-Playbooks for rewards-related incidents. For symptom lookup see
-[Troubleshooting](../rewards/troubleshooting.md); for the safety model see
-[Security & Failure Modes](../rewards/security-and-failure-modes.md).
+What a symptom means, how serious it is, and what to do. The table points at the
+playbook for each; node-level problems (a node that will not start or sync) are on the
+[Node Operator Guide](node-operator-guide.md#troubleshooting), and the safety model is
+on [Security & Failure Modes](../rewards/security-and-failure-modes.md).
+
+## Symptom lookup
+
+| Symptom | Likely cause | Check, or go to |
+|---|---|---|
+| Nodes disagree on the app hash | **critical:** a state fork | [App-hash divergence](#app-hash-divergence-across-nodes-critical) |
+| Node stuck, repeated EndBlock error | a fail-closed finalization fault halted the block, by design | [Repeated EndBlock error](#repeated-endblock-error--chain-halted) |
+| Epoch not finalizing | the boundary has not been reached | `rewards-query epoch-info`: the height against `current_epoch_end_height` |
+| Mint is zero at the boundary | rewards were paused for the epoch, or the subsidy has floored to zero near the cap | `rewards-query pause-state`; `rewards-query next-halving` (`current_block_subsidy`) |
+| `cumulative_emitted` not advancing | rewards are paused | [Rewards paused unexpectedly](#rewards-paused-unexpectedly) |
+| Releases failing for everyone | rewards are paused | [Releases failing for everyone](#releases-failing-for-everyone) |
+| One release rejected | the epoch is not finalized, there is no entitlement, or the amount exceeds what remains | `mining-query settlement <slot-id> <epoch>` (`remaining_amount`, `deadline_clock`, `permissionless_finalization_now`); `rewards-query entitlement <slot-id> <epoch>`; every check a chunk must pass is on [Settlement](../rewards/settlement.md) |
+| Params update rejected | a field no transaction may change, an unsupported feature, or the wrong signer | [Parameters: what update-params rejects](../rewards/params.md#what-update-params-rejects) |
+| Wrong params queued | — | [Wrong params queued](#wrong-params-queued) |
+| `pause` or `resume` rejected | not signed by the emergency authority | sign with the CoreSlot emergency authority |
+| Escrow below what it owes | an accounting defect | [Module-balance coverage failure](#module-balance-coverage-failure) |
+| A key is exposed | — | [Key compromise](#key-compromise) |
+| A key is lost | — | [What each key controls, and what to do if it is lost](../rewards/security-and-failure-modes.md#what-each-key-controls-and-what-to-do-if-it-is-lost) |
+| Paging returns an empty `next_key` | the last page | normal; stop paging |
 
 ## App-hash divergence across nodes (critical)
 
@@ -81,8 +101,8 @@ counted.
 
 Check the canonical pause state (`rewards-query pause-state`, above). If paused
 intentionally (incident containment), communicate the window; if not, `rewards
-resume` via the emergency authority. Individual settlement rejections are not
-incidents — see [Troubleshooting](../rewards/troubleshooting.md).
+resume` via the emergency authority. A single rejected settlement transaction is not an
+incident; see [Settlement](../rewards/settlement.md) for what each check refuses.
 
 ## Wrong params queued
 
@@ -92,7 +112,8 @@ params apply only to the next epoch onward and can be re-queued.
 
 ## Module-balance coverage failure
 
-If `module-balances.rewards_balance` < outstanding entitlements + carry, stop and
+If `module-balances` shows `rewards_balance` below `outstanding_entitlement_liability`
+plus `carry_forward_remainder`, stop and
 investigate — this should not occur under the rewards accounting invariants (the
 coverage invariant holds after every finalize and every release). Treat as a
 critical accounting defect.

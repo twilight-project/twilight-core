@@ -34,23 +34,23 @@ The production monetary design is expected to be **zero-premine**:
 Development/localnet fixtures may explicitly fund accounts (e.g. the localnet
 `init.sh` funds the authority and emergency accounts with
 `1,000,000,000,000{constants.nativeDenom}` each). Any funded balance is a test
-fixture, not a production premine — see [Localnet](localnet.md) and
+fixture, not a production premine — see [Localnet & Drills](../development/localnet-drills.md) and
 [Status & Validation](status-and-validation.md).
 
 ## Module accounts
 
-| Account | Permission | Purpose |
-|---|---|---|
-| `{constants.rewardsModuleAccount}` | `Minter` | Holds minted epoch emission and unreleased entitlements; the only minter on the chain |
-| `{constants.feePoolModuleAccount}` | _(none)_ | Dormant fee plumbing; holds nothing while fees are disabled |
-| `fee_collector` | _(none)_ | The SDK's standard fee destination; the chain requires no fee, but any fee a sender attaches lands here and nothing pays out of it |
-| `coreslot-authority` | _(none)_ | Keyless: the authority the SDK modules are bound to, so their own authority messages cannot be signed; also what `twilightd init` writes as the CoreSlot `authority` until a launch sets a real one |
-| `coreslot-emergency` | _(none)_ | Keyless placeholder `twilightd init` writes as the CoreSlot `emergency_authority` |
+There are five, declared once in `app/config.go`: `{constants.rewardsModuleAccount}`
+(the escrow, and the only minter), `{constants.feePoolModuleAccount}` (dormant),
+`fee_collector`, and the keyless `coreslot-authority` and `coreslot-emergency`. Nothing
+can burn, and a module account is always refused as a payee. What each holds, its
+address and how to query it are on [Module Accounts](../reference/module-accounts.md).
 
-All five are declared once in `app/config.go`, and that declaration also feeds the
-economic-address rule: a module account is refused as a payout, settlement or treasury
-address. Only `{constants.rewardsModuleAccount}` can mint; nothing can burn. Addresses
-and queries are on [Module Accounts](../reference/module-accounts.md).
+## Transfer rules
+
+A transfer that creates an account must carry at least 10,000 `{constants.nativeDenom}`,
+module accounts cannot receive bank transfers, and a transaction may carry at most 32
+bank outputs. The details and error texts are on the
+[Integrator Guide](../reference/integrators.md#transfer-rules).
 
 :::note Fees are dormant
 Fee collection and fee distribution are **disabled** in the current version. The

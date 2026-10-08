@@ -75,5 +75,5 @@ move on a live entitlement, and it may never pass the amount it is bounded by.
 These are accounting safety nets, not routine checks. If you build monitoring,
 the most operationally useful derived checks are supply ≤ cap, cumulative ≤ cap,
 and module balance ≥ outstanding entitlements + carry — all queryable via
-[`cumulative-emitted`](queries.md) and [`module-balances`](queries.md). See
+[`cumulative-emitted`](../reference/cli.md#rewards-query) and [`module-balances`](../reference/cli.md#rewards-query). See
 [Monitoring](../operators/monitoring.md).

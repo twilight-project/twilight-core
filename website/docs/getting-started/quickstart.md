@@ -23,7 +23,7 @@ This starts a four-node network with a 360-block rewards epoch at a fast block
 time, drives it through epoch finalization, and asserts cross-node app-hash
 agreement. It prints a `PASS` summary with the minted emission, the per-slot
 reward, and the entitlements the epoch created. See
-[Localnet](../chain/localnet.md) for what it covers (and the funded-fixture
+[Localnet & Drills](../development/localnet-drills.md) for what it covers (and the funded-fixture
 caveat).
 
 ## 3. Query rewards state
@@ -41,7 +41,7 @@ twilightd rewards-query module-balances --node tcp://127.0.0.1:26657
 twilightd rewards-query cumulative-emitted --node tcp://127.0.0.1:26657
 ```
 
-See [Queries](../rewards/queries.md) for all commands and output fields.
+See [CLI & Queries](../reference/cli.md#rewards-query) for all commands and output fields.
 
 ## 4. How rewards are released
 

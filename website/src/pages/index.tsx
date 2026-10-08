@@ -66,7 +66,7 @@ export default function Home(): React.ReactElement {
             released by settlement.
           </p>
           <div className={styles.ctaRow}>
-            <Link className={styles.ctaPrimary} to="/getting-started/overview">
+            <Link className={styles.ctaPrimary} to="/intro">
               Get started
             </Link>
             <Link className={styles.ctaSecondary} to="/operators/node-operator-guide">

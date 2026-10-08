@@ -5,7 +5,7 @@ title: Node Operator Guide
 # Node Operator Guide
 
 Practical steps to build, initialize, and run a `twilightd` node. For multi-node
-localnets see [Localnet](../chain/localnet.md).
+localnets see [Localnet & Drills](../development/localnet-drills.md).
 
 ## Build
 

@@ -13,6 +13,10 @@ const config: Config = {
   // Pages target: the project site under the twilight-project organization.
   url: "https://twilight-project.github.io",
   baseUrl: "/twilight-core/",
+  // GitHub Pages serves every page as <path>/index.html and answers <path> with a 301
+  // to <path>/. Emitting the slashed form in canonical links, the sitemap and internal
+  // links means a reader or crawler lands on the page itself, not on a redirect.
+  trailingSlash: true,
   organizationName: "twilight-project",
   projectName: "twilight-core",
   favicon: "img/twilight.svg",
@@ -27,7 +31,21 @@ const config: Config = {
     mermaid: true,
     hooks: { onBrokenMarkdownLinks: "throw" },
   },
-  themes: ["@docusaurus/theme-mermaid"],
+  themes: [
+    "@docusaurus/theme-mermaid",
+    // Local search: the index is built with the site and searched in the browser, so
+    // no query leaves the page and no third-party service is involved.
+    [
+      "@easyops-cn/docusaurus-search-local",
+      {
+        hashed: true,
+        docsRouteBasePath: "/",
+        indexBlog: false,
+        highlightSearchTermsOnTargetPage: true,
+        explicitSearchResultPath: true,
+      },
+    ],
+  ],
 
   // Brand fonts (Google Fonts for now; self-hosting tracked as later hardening).
   headTags: [
@@ -84,6 +102,14 @@ const config: Config = {
           { from: "/reference/rewards-tx-api", to: "/reference/cli" },
           // The rewards-only events page became the events reference for all modules.
           { from: "/rewards/events", to: "/reference/events" },
+          // Duplicate page pairs collapsed into one page each (#238, item 10).
+          { from: "/getting-started/overview", to: "/intro" },
+          { from: "/chain/localnet", to: "/development/localnet-drills" },
+          { from: "/chain/genesis", to: "/reference/genesis-reference" },
+          { from: "/development/module-map", to: "/chain/architecture" },
+          { from: "/rewards/operator-runbook", to: "/operators/rewards-operator-guide" },
+          { from: "/rewards/troubleshooting", to: "/operators/incident-response" },
+          { from: "/rewards/queries", to: "/reference/cli" },
         ],
       },
     ],

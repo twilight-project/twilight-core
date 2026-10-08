@@ -66,14 +66,8 @@ finalization is the multi-node evidence.
 
 ## Failure-mode reference
 
-| Symptom | Likely cause | Check |
-|---|---|---|
-| Epoch not finalizing | boundary not reached | `epoch-info` (`current_epoch_end_height`, height) |
-| Mint is zero at finalization | rewards paused, or subsidy floored to 0 near cap | `pause-state`; `next-halving` |
-| Release rejected | rewards paused, epoch not finalized, no entitlement, or the amount exceeds what remains | `pause-state`; `epoch-reward`; `module-balances` |
-| Params update rejected | a field that no transaction may change, an unsupported feature, or the wrong signer | see [Parameters](params.md#what-update-params-rejects) |
-| App-hash divergence across nodes | **critical** — a state fork | stop, investigate before continuing; see [Localnet](../chain/localnet.md) |
-| Pagination returns empty `next_key` | last page reached | normal; stop paging |
+Symptoms, their likely causes and what to do are on
+[Incident Response](../operators/incident-response.md#symptom-lookup).
 
 ## Authority model
 
