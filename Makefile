@@ -94,9 +94,12 @@ release-upgrade-faults:
 	./scripts/localnet/release-upgrade-rehearsal-faults.sh
 
 # The full qualification: a published release upgraded to the candidate across a
-# four-validator partial rollout. Slow, needs gh and free ports.
+# four-validator partial rollout. Slow, needs gh and free ports. PROFILE names one
+# pinned qualification in scripts/localnet/lib/rehearsal-profiles.sh, e.g.
+#   make release-upgrade-rehearsal PROFILE=v0.1.0-to-v0.2.0
 release-upgrade-rehearsal:
-	./scripts/localnet/release-upgrade-rehearsal.sh
+	@test -n "$(PROFILE)" || { echo "set PROFILE=<name>; profiles are in scripts/localnet/lib/rehearsal-profiles.sh" >&2; exit 2; }
+	./scripts/localnet/release-upgrade-rehearsal.sh "$(PROFILE)"
 
 test:
 	go test ./...

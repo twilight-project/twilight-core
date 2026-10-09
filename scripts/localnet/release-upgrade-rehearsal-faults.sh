@@ -21,6 +21,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/localnet/lib/drill-common.sh"
 . "$ROOT/scripts/localnet/lib/drill-assert.sh"
+. "$ROOT/scripts/localnet/lib/rehearsal-profiles.sh"
 set +e
 
 PASSED=0; FAILED=0
@@ -433,6 +434,53 @@ check "one that crossed does not"               "different" \
   "$([[ "$((H + 2))" != "$((H - 1))" ]] && echo different || echo SAME)"
 
 # ---- finalization on failure ------------------------------------------------------------
+
+group "a qualification is a pinned profile, and nothing else selects one"
+
+# Run in subshells: a load sets globals, and one case must not leak into the next.
+check "no profile name is refused"            "2" "$( ( rehearsal_profile_load "" ); echo $? )"
+check "an unknown profile is refused"         "1" "$( ( rehearsal_profile_load v9.9.9-to-v10.0.0 ); echo $? )"
+# A refused load must set nothing, or a caller that ignored the status would run
+# half a profile.
+check "  and a refused load sets nothing"     "unset" \
+  "$( ( unset PROFILE_FROM_TAG; rehearsal_profile_load nope; echo "${PROFILE_FROM_TAG:-unset}" ) )"
+# The script refuses before it downloads, starts or writes anything.
+check "the script refuses no profile"         "2" \
+  "$( ( RUN_ID="faults-$$" "$ROOT/scripts/localnet/release-upgrade-rehearsal.sh" >/dev/null 2>&1 ); echo $? )"
+check "the script refuses an unknown profile" "2" \
+  "$( ( RUN_ID="faults-$$" "$ROOT/scripts/localnet/release-upgrade-rehearsal.sh" nope >/dev/null 2>&1 ); echo $? )"
+check "  and left no evidence behind"         "absent" \
+  "$([[ -e "$ROOT/build/localnet/evidence/faults-$$" ]] && echo present || echo absent)"
+
+# Every listed profile is complete: a missing field would make a run silently test
+# less, and a missing surface function would only surface mid-run.
+for p in "${REHEARSAL_PROFILES[@]}"; do
+  check "$p loads"                            "0" "$( ( rehearsal_profile_load "$p" ); echo $? )"
+  check "$p is complete" "complete" "$( (
+    rehearsal_profile_load "$p" || exit 1
+    for v in PROFILE_NAME PROFILE_FROM_TAG PROFILE_FROM_COMMIT PROFILE_UPGRADE_NAME \
+             PROFILE_VERSION_MAP_AFTER PROFILE_STATE_SUMMARY PROFILE_SURFACE_FN \
+             PROFILE_SURFACE_SUMMARY PROFILE_SURFACE_MULTISET; do
+      [[ -n "${!v:-}" ]] || { echo "missing $v"; exit 0; }
+    done
+    [[ "$PROFILE_FROM_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "commit is not a full SHA"; exit 0; }
+    (( ${#PROFILE_SURFACE_FILES[@]} > 0 )) || { echo "no surface evidence"; exit 0; }
+    declare -F "$PROFILE_SURFACE_FN" >/dev/null || { echo "no function $PROFILE_SURFACE_FN"; exit 0; }
+    echo complete ) )"
+  # The contract must compare as a string with what drill-assert observes, which it
+  # sorts with LC_ALL=C; an unsorted expectation would fail every honest run.
+  check "$p contract is sorted as observed"   "sorted" "$( (
+    rehearsal_profile_load "$p"
+    m="$(rehearsal_expected_multiset)"
+    [[ "$m" == "$(tr ',' '\n' <<<"$m" | LC_ALL=C sort | paste -sd, -)" ]] && echo sorted || echo unsorted ) )"
+  check "$p contract has no duplicate key"    "unique" "$( (
+    rehearsal_profile_load "$p"
+    n="$(rehearsal_expected_multiset | tr ',' '\n' | cut -d: -f1 | sort | uniq -d | wc -l | tr -d ' ')"
+    (( n == 0 )) && echo unique || echo "$n duplicated" ) )"
+done
+
+# The refactor must not change what the original qualification proves.
+check "v0.1.0-to-v0.2.0 makes 100 assertions" "100" "$( ( rehearsal_profile_load v0.1.0-to-v0.2.0; rehearsal_expected_assertions ) )"
 
 group "a failing run still writes a machine-readable verdict"
 

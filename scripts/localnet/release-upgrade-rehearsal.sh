@@ -3,6 +3,12 @@ set -uo pipefail
 
 # Qualifies a PUBLISHED release for upgrade to a candidate build.
 #
+#   scripts/localnet/release-upgrade-rehearsal.sh <profile>
+#   make release-upgrade-rehearsal PROFILE=<profile>
+#
+# The profile names one pinned qualification in lib/rehearsal-profiles.sh: the
+# release it starts from, the upgrade it executes, and that upgrade's own proof.
+#
 # The existing upgrade drill proves the mechanism. It builds both binaries from
 # one working tree, differing only by a build tag, and exercises `drill-v2` — a
 # name compiled in for the drill and never shipped. So nothing has executed the
@@ -38,19 +44,31 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/localnet/lib/drill-common.sh"
 . "$ROOT/scripts/localnet/lib/drill-assert.sh"
+. "$ROOT/scripts/localnet/lib/rehearsal-profiles.sh"
 # drill-common enables `set -e`. This drill accounts for its own failures: a
 # failed assertion must reach the verdict file, not terminate the run before it.
 set +e
 
 # ---- the qualification contract, pinned ---------------------------------------
 #
-# Not caller-overridable. "v0.1.0 -> v0.2.0 qualification" has to mean one thing,
-# and an environment variable that silently changed which release was tested would
-# make a PASS unattributable.
+# Chosen by naming a profile, never by overriding a value. "v0.1.0 -> v0.2.0
+# qualification" has to mean one thing, and an environment variable that silently
+# changed which release was tested would make a PASS unattributable. So the
+# argument selects a whole pinned profile, the values become readonly, and the
+# verdict records the profile's name.
+PROFILE_ARG="${1:-}"
+rehearsal_profile_load "$PROFILE_ARG"
+case $? in
+  0) ;;
+  2) echo "rehearsal: name a profile: $0 <profile>  (profiles: ${REHEARSAL_PROFILES[*]})" >&2; exit 2 ;;
+  *) echo "rehearsal: unknown profile '$PROFILE_ARG' (profiles: ${REHEARSAL_PROFILES[*]})" >&2; exit 2 ;;
+esac
 readonly RELEASE_REPO="twilight-project/twilight-core"
-readonly FROM_TAG="v0.1.0"
-readonly EXPECTED_A_COMMIT="b8ed78ed29f1667fceab8476f5e303c589471fa7"
-readonly UPGRADE_NAME="v0.2.0"
+readonly PROFILE_NAME
+readonly FROM_TAG="$PROFILE_FROM_TAG"
+readonly EXPECTED_A_COMMIT="$PROFILE_FROM_COMMIT"
+readonly UPGRADE_NAME="$PROFILE_UPGRADE_NAME"
+
 # Four validators specifically: three of four is above the two-thirds quorum, so a
 # partial rollout can proceed while one node stays behind. At two or three the
 # interesting case cannot be expressed at all.
@@ -62,22 +80,17 @@ RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 DRILL_EVID_DIR="$ROOT/build/localnet/evidence/$RUN_ID/release-upgrade"
 WORK="$ROOT/build/localnet/rehearsal-$RUN_ID"
 
-# The module version map the CANDIDATE must carry. Pinned rather than derived, so
-# a module silently dropped, an unexpected one appearing, or a migration that
-# failed to bump a version all fail here. Only coreslot moves: 1 -> 2.
-readonly EXPECTED_VERSION_MAP_AFTER="auth:5,bank:4,consensus:1,coreslot:2,mining:1,rewards:1,runtime:omitted-zero,upgrade:2"
+# The module version map the CANDIDATE must carry, from the profile.
+readonly EXPECTED_VERSION_MAP_AFTER="$PROFILE_VERSION_MAP_AFTER"
 
-DRILL_MANDATORY_FILES=(
-  binaries.json topology.json halt.json agreement.json
-  coreslot-at-H-1.json coreslot-at-H.json version-map-after.json nomination-tx.json
-  assertions.jsonl summary.csv
-)
+DRILL_MANDATORY_FILES=("${REHEARSAL_BASE_FILES[@]}" "${PROFILE_SURFACE_FILES[@]}")
 DRILL_VERDICT_GATES=(
   "provenance=VERIFIED" "halt=COORDINATED" "rollout=PARTIAL"
   "stale=HELD_AT_H_MINUS_1" "state=PRESERVED" "surface=PRESENT"
 )
 
-# The proof contract, locked against a calibration run and then read back against
+# The proof contract: the assertions every profile makes plus the profile's own
+# surface assertions, locked against a calibration run and then read back against
 # the requirements rather than copied blindly. A count alone is a floor: it lets
 # one node's assertion vanish while another is duplicated in its place, which is
 # why the multiset is keyed by (assertion, node).
@@ -88,8 +101,8 @@ DRILL_VERDICT_GATES=(
 # and the command surface. Changing any of these numbers should require changing
 # the proof, which is the point.
 DRILL_EXPECTED_PHASES=10
-DRILL_EXPECTED_ASSERTIONS=100
-DRILL_EXPECTED_MULTISET="a_matches_published_checksum|-:1,a_reports_released_commit|-:1,a_reports_released_version|-:1,a_survived_init|-:1,b_reports_candidate_commit|-:1,b_reports_upgrade_version|-:1,binaries_differ|-:1,cometbft_validators|-:1,converged_binary_is_b|3:1,coreslot_active_slots|-:1,coreslot_snapshots_taken|-:1,coreslot_state_unchanged_across_boundary|-:1,final_agree_app_hash|0:1,final_agree_app_hash|1:1,final_agree_app_hash|2:1,final_agree_app_hash|3:1,halt_app_height|0:1,halt_app_height|1:1,halt_app_height|2:1,halt_app_height|3:1,halt_block_store_height|0:1,halt_block_store_height|1:1,halt_block_store_height|2:1,halt_block_store_height|3:1,halt_logged_upgrade_required|0:1,halt_logged_upgrade_required|1:1,halt_logged_upgrade_required|2:1,halt_logged_upgrade_required|3:1,nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1,pending_plan_height|0:1,pending_plan_height|1:1,pending_plan_height|2:1,pending_plan_height|3:1,pending_plan_name|0:1,pending_plan_name|1:1,pending_plan_name|2:1,pending_plan_name|3:1,quorum_progressed_during_stale|0:1,quorum_progressed_during_stale|1:1,quorum_progressed_during_stale|2:1,running_binary_is_a|0:1,running_binary_is_a|1:1,running_binary_is_a|2:1,running_binary_is_a|3:1,running_binary_is_b|0:1,running_binary_is_b|1:1,running_binary_is_b|2:1,schedule_tx_delivered|-:1,stale_caught_up_on_b|-:1,stale_did_not_commit_h|3:1,stale_process_after_refusal_characterization|3:1,stale_refusal_is_fresh|3:1,stale_rpc_after_refusal_characterization|3:1,stale_window_agree_app_hash|0:1,stale_window_agree_app_hash|1:1,stale_window_agree_app_hash|2:1,stale_window_agree_next_validators_hash|0:1,stale_window_agree_next_validators_hash|1:1,stale_window_agree_next_validators_hash|2:1,stale_window_agree_validators_hash|0:1,stale_window_agree_validators_hash|1:1,stale_window_agree_validators_hash|2:1,stale_window_has_common_fresh_height|-:1,upgrade_info_height|0:1,upgrade_info_height|1:1,upgrade_info_height|2:1,upgrade_info_height|3:1,upgrade_info_name|0:1,upgrade_info_name|1:1,upgrade_info_name|2:1,upgrade_info_name|3:1,upgrade_info_present|0:1,upgrade_info_present|1:1,upgrade_info_present|2:1,upgrade_info_present|3:1,upgrade_recorded_applied|-:1,upgraded_agree_app_hash|0:1,upgraded_agree_app_hash|1:1,upgraded_agree_app_hash|2:1,upgraded_agree_next_validators_hash|0:1,upgraded_agree_next_validators_hash|1:1,upgraded_agree_next_validators_hash|2:1,upgraded_agree_validators_hash|0:1,upgraded_agree_validators_hash|1:1,upgraded_agree_validators_hash|2:1,upgraded_quorum_passed_the_boundary|-:1,validator_identities_unique|-:1,validator_identity_power|0:1,validator_identity_power|1:1,validator_identity_power|2:1,validator_identity_power|3:1,validator_identity_present|0:1,validator_identity_present|1:1,validator_identity_present|2:1,validator_identity_present|3:1,validator_power_max|-:1,validator_power_min|-:1,version_map_is_expected|-:1"
+DRILL_EXPECTED_MULTISET="$(rehearsal_expected_multiset)"
+DRILL_EXPECTED_ASSERTIONS="$(rehearsal_expected_assertions)"
 
 # ---- failure handling ---------------------------------------------------------
 #
@@ -481,33 +494,14 @@ if VM="$(version_map_from_json "$VMJSON")"; then
 else fail "could not parse the module version map"; fi
 expect "upgrade_recorded_applied" "$UPGRADE_HEIGHT" \
   "$("$BIN_B" query upgrade applied "$UPGRADE_NAME" --node "$(rpc_url 1)" --output json 2>/dev/null | jq -r '.height // ""')"
-phase_end "state" "complete CoreSlot state identical; only coreslot moved 1 -> 2"
+phase_end "state" "$PROFILE_STATE_SUMMARY"
 
 # ---- 9. the surface the upgrade delivers ---------------------------------------------
 
-echo "==> exercising the real rotation command"
+echo "==> proving what $UPGRADE_NAME delivers"
 phase_begin
-# `--help` returning zero proves nothing: cobra exits zero for a parent's help
-# even when the child is absent. This builds an actual transaction and inspects
-# the message it produced. --generate-only, so nothing is broadcast and the state
-# compared above is untouched.
-AUTH_ADDR="$("$BIN_B" keys show operator0 -a --keyring-backend test --home "$(node_home 0)" 2>/dev/null)"
-NOMINEE="$("$BIN_B" keys show operator1 -a --keyring-backend test --home "$(node_home 1)" 2>/dev/null)"
-if [[ -n "$AUTH_ADDR" && -n "$NOMINEE" ]]; then
-  "$BIN_B" tx coreslot nominate-authority primary "$NOMINEE" \
-    --from operator0 --keyring-backend test --home "$(node_home 0)" \
-    --chain-id "$CHAIN_ID" --node "$(rpc_url 1)" --generate-only --output json \
-    >"$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null
-  expect "nomination_builds_the_right_msg" "/twilight.coreslot.v1.MsgNominateAuthority" \
-    "$(jq -r '.body.messages[0]."@type" // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
-  expect "nomination_carries_the_role" "AUTHORITY_ROLE_PRIMARY" \
-    "$(jq -r '.body.messages[0].role // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
-  expect "nomination_carries_the_nominee" "$NOMINEE" \
-    "$(jq -r '.body.messages[0].nominee // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
-else
-  fail "could not resolve the authority or nominee address"
-fi
-phase_end "surface" "the candidate builds a real MsgNominateAuthority"
+"$PROFILE_SURFACE_FN"
+phase_end "surface" "$PROFILE_SURFACE_SUMMARY"
 
 # ---- 10. convergence ------------------------------------------------------------------
 
@@ -546,6 +540,7 @@ DRILL_VERDICT_LINES=(
   "stale=HELD_AT_H_MINUS_1"
   "state=$([[ "$(cat "$DRILL_EVID_DIR/coreslot-at-H-1.json" 2>/dev/null)" == "$(cat "$DRILL_EVID_DIR/coreslot-at-H.json" 2>/dev/null)" ]] && echo PRESERVED || echo CHANGED)"
   "surface=PRESENT"
+  "profile=$PROFILE_NAME"
   "from=$FROM_TAG@$EXPECTED_A_COMMIT"
   "to=$UPGRADE_NAME@$CANDIDATE_COMMIT"
 )
