@@ -91,7 +91,7 @@ test.
 |---|---|
 | `make localnet-authority-rotation-drill` | two-step rotation of both authority roles: nominate, prove the incumbent still acts and the nominee does not, accept, prove the roles swapped, and prove a params update cannot rotate either; no cross-node hash check |
 | `make localnet-upgrade-drill` | a coordinated `x/upgrade` across four validators and two binaries: every validator halts at the same height, upgraded nodes agree across the boundary, a node left on the old binary halts, and downtime does not consume the settlement clock |
-| `make release-upgrade-rehearsal` | the v0.1.0 → v0.2.0 boundary: fetches the published v0.1.0 asset, verifies it against that release's `SHA256SUMS`, and upgrades it to the candidate through the production `v0.2.0` handler with a partial rollout. Slow; needs `gh` and free ports |
+| `make release-upgrade-rehearsal PROFILE=…` | qualifies a published release for upgrade to the candidate through the production handler, with a partial rollout and a straggler. Each profile in `scripts/localnet/lib/rehearsal-profiles.sh` pins the release (tag and commit), the upgrade name and what the upgrade must deliver; today `v0.1.0-to-v0.2.0`. Slow; needs `gh` and free ports |
 
 ## State, genesis and load
 
