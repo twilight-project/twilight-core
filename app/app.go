@@ -40,6 +40,7 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/x/bank"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus"
+	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 
 	"github.com/twilight-project/twilight-core/app/openapi"
 	"github.com/twilight-project/twilight-core/app/params"
@@ -81,11 +82,15 @@ type App struct {
 	*runtime.App
 	CoreSlotKeeper coreslotkeeper.Keeper
 	UpgradeKeeper  *upgradekeeper.Keeper
-	RewardsKeeper  rewardskeeper.Keeper
-	MiningKeeper   miningkeeper.Keeper
-	AccountKeeper  authkeeper.AccountKeeper
-	BankKeeper     bankkeeper.BaseKeeper
-	appCodec       codec.Codec
+	// ConsensusKeeper holds the block and evidence parameters CometBFT runs with.
+	// No transaction can reach it (its authority is a keyless module account); an
+	// upgrade handler can, through MigrationKeepers.Consensus.
+	ConsensusKeeper consensuskeeper.Keeper
+	RewardsKeeper   rewardskeeper.Keeper
+	MiningKeeper    miningkeeper.Keeper
+	AccountKeeper   authkeeper.AccountKeeper
+	BankKeeper      bankkeeper.BaseKeeper
+	appCodec        codec.Codec
 }
 
 func AuthorityAddress() string {
@@ -166,6 +171,9 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 		accountKeeper authkeeper.AccountKeeper
 		bankKeeper    bankkeeper.BaseKeeper
 		upgradeKeeper *upgradekeeper.Keeper
+		// Resolved so an upgrade handler can change block parameters (#170); nothing
+		// else in the app writes them.
+		consensusKeeper consensuskeeper.Keeper
 	)
 	// appOpts was previously discarded. It must be supplied: x/upgrade reads the
 	// home directory from it, and without one the keeper looks for its
@@ -190,7 +198,7 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	}
 	if err := depinject.Inject(
 		depinject.Configs(configs...),
-		&builder, &cdc, &accountKeeper, &bankKeeper, &upgradeKeeper,
+		&builder, &cdc, &accountKeeper, &bankKeeper, &upgradeKeeper, &consensusKeeper,
 	); err != nil {
 		panic(err)
 	}
@@ -298,7 +306,12 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 
 	// Must run BEFORE Load: handler registration has to be in place for the keeper
 	// to answer whether it knows an upgrade name at the moment a plan is proposed.
-	registerUpgradeHandlers(runtimeApp, upgradeKeeper, coreSlotKeeper, rewardsKeeper, miningKeeper)
+	registerUpgradeHandlers(runtimeApp, upgradeKeeper, MigrationKeepers{
+		CoreSlot:  coreSlotKeeper,
+		Rewards:   rewardsKeeper,
+		Mining:    miningKeeper,
+		Consensus: consensusKeeper,
+	})
 
 	// Only when a home directory is actually configured. Reading the upgrade-info
 	// file creates <home>/data, so with an empty home it would create a relative
@@ -341,14 +354,15 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 		panic(err)
 	}
 	return &App{
-		App:            runtimeApp,
-		CoreSlotKeeper: coreSlotKeeper,
-		UpgradeKeeper:  upgradeKeeper,
-		RewardsKeeper:  rewardsKeeper,
-		MiningKeeper:   miningKeeper,
-		AccountKeeper:  accountKeeper,
-		BankKeeper:     bankKeeper,
-		appCodec:       cdc,
+		App:             runtimeApp,
+		CoreSlotKeeper:  coreSlotKeeper,
+		UpgradeKeeper:   upgradeKeeper,
+		ConsensusKeeper: consensusKeeper,
+		RewardsKeeper:   rewardsKeeper,
+		MiningKeeper:    miningKeeper,
+		AccountKeeper:   accountKeeper,
+		BankKeeper:      bankKeeper,
+		appCodec:        cdc,
 	}
 }
 
