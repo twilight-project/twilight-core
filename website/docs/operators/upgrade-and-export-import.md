@@ -93,8 +93,10 @@ The mechanism is covered by application tests and by a four-validator localnet d
 with two separately built binaries (`make localnet-upgrade-drill`): every validator halts
 at the same height, the upgraded nodes agree on the application hash across the
 boundary, a validator left on the old binary fails closed, the settlement clock does not
-consume the downtime, and the migration runs exactly once. Two handlers are registered,
-`v0.2.0` and `v0.3.0`.
+consume the downtime, and the migration runs exactly once. Three handlers are registered:
+`v0.2.0`, `v0.3.0`, and `v0.4.0`, which sets `block.max_gas` to 30,000,000. Before release,
+`v0.4.0` was rehearsed from the published `v0.3.1` on four validators and run on a
+37-validator devnet under load.
 
 Not yet exercised: store-layout changes (adding, renaming or deleting a store), and
 Cosmovisor itself, which the drill swaps by hand so that a tooling failure cannot be

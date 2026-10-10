@@ -98,12 +98,13 @@ by different mechanisms and on different timelines:
 - **TW-005** — feeless mempool admission. **Mitigated, not closed.** The backlog a node will
   queue is bounded by configuration (#164). That bound is node-local: it binds the nodes an
   operator runs, and it is not consensus-enforced per-sender fairness.
-- **TW-004** — unlimited block gas. **Open.** A finite `block.max_gas` can be set at genesis,
-  but not by transaction: consensus parameters are unreachable from any signable message on
-  this chain (#167). On a running network, a named upgrade's handler can set them with
-  `app.SetBlockParams` (#170), so changing one is a coordinated upgrade.
-  Calibrating a value against representative hardware (#160) and establishing the
-  legitimate-gas floor (#107) both remain open.
+- **TW-004** — unlimited block gas. **Fixed in `v0.4.0`; open on a network until it executes
+  that upgrade.** A finite `block.max_gas` can be set at genesis, but not by transaction:
+  consensus parameters are unreachable from any signable message on this chain (#167). On a
+  running network, a named upgrade's handler can set them with `app.SetBlockParams` (#170);
+  the `v0.4.0` handler sets `block.max_gas` to 30,000,000, a ceiling chosen from legitimate
+  traffic (#258). Calibrating a value against representative hardware (#160) and the
+  legitimate-gas floor (#107) remain open, and a later upgrade can move the value.
 
 Earlier commits carry descriptive tags rather than version numbers, because a chain launched
 from a build without `x/upgrade` can never be upgraded, and numbering such a build would imply
