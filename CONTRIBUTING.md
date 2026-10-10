@@ -179,7 +179,8 @@ the previous release aside and moving the new one into place puts the previous r
 
 The environment cannot change what is built. Releases run with `GOENV=off GOWORK=off
 GOFLAGS=-mod=readonly CGO_ENABLED=0`, `GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off`, an empty
-`GOEXPERIMENT`, and `GOTOOLCHAIN` pinned to the `go` directive of the commit's `go.mod`, so the
+`GOEXPERIMENT`, and `GOTOOLCHAIN` pinned to the commit's `go.mod` (its `toolchain` line, or the
+`go` directive when there is none), so the
 Go version on the host does not change the binaries (go fetches the pinned toolchain if the
 host's differs). Settings such as `GOPROXY` or `GOPRIVATE` must therefore be passed as real
 environment variables, not through `go env -w`. A release works offline (`GOPROXY=off`) when

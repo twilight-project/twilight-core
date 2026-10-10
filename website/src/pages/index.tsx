@@ -5,7 +5,7 @@ import styles from "./index.module.css";
 
 // The site documents `main`. The release named here is the latest tag; update it as
 // part of cutting a release (see CONTRIBUTING.md, "Building a release").
-const latestRelease = "v0.3.0";
+const latestRelease = "v0.3.1";
 const releasesUrl = "https://github.com/twilight-project/twilight-core/releases";
 
 type Card = { title: string; desc: string; to: string; tag: string };
