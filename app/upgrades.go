@@ -168,10 +168,10 @@ var Upgrades = []Upgrade{
 		//
 		// V040BlockMaxGas is a ceiling chosen from what legitimate traffic needs, not
 		// from what the hardware can execute in a block time: the heaviest legitimate
-		// transaction (a 32-new-recipient settlement chunk) declares ~1.6 M at the
-		// CLI's 1.5x margin, so 30 M is ~18x that and holds ~18 such chunks or ~255
-		// simple sends per block. #160 and #107 measure capacity; a later upgrade can
-		// move the value either way.
+		// transaction (a 32-new-recipient settlement chunk) uses ~1.07 M and declares
+		// ~1.6 M at a 1.5x gas adjustment, so 30 M is ~18x that and holds ~18 such
+		// chunks or ~255 simple sends per block. #160 and #107 measure capacity; a
+		// later upgrade can move the value either way.
 		//
 		// max_bytes is written back as stored, so no operator's mempool bound
 		// (cmd/twilightd/cmd/root.go, nodeConfig) goes stale. Note when the value

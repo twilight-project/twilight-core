@@ -482,6 +482,52 @@ done
 # The refactor must not change what the original qualification proves.
 check "v0.1.0-to-v0.2.0 makes 100 assertions" "100" "$( ( rehearsal_profile_load v0.1.0-to-v0.2.0; rehearsal_expected_assertions ) )"
 
+group "the v0.4.0 proof reads CometBFT's params and fails closed"
+
+# The surface proof of the v0.3.1-to-v0.4.0 profile, against stubbed
+# /consensus_params responses. Each bad case must FAIL the specific assertion that
+# would otherwise compare two blanks, two nulls or the wrong heights as equal.
+cp_json() { # <height> <max_gas> [version_app] [drop-section]
+  jq -nc --arg h "$1" --arg g "$2" --arg v "${3:-0}" --arg drop "${4:-}" '
+    {jsonrpc: "2.0", id: -1, result: {block_height: $h, consensus_params: {
+      block: {max_bytes: "22020096", max_gas: $g},
+      evidence: {max_age_num_blocks: "100000", max_age_duration: "172800000000000", max_bytes: "1048576"},
+      validator: {pub_key_types: ["ed25519"]},
+      version: {app: $v},
+      abci: {vote_extensions_enable_height: "0"}} | del(.[$drop])}}'
+}
+surface_case() { # <before-json> <after-json> -> runs the proof, prints "assertion=result ..."
+  local ev="$WORK/surface-$RANDOM"
+  CP_BEFORE="$1"; CP_AFTER="$2"
+  (
+    drill_assert_init "$ev" >/dev/null 2>&1
+    UPGRADE_HEIGHT=27
+    rpc_get() { case "$2" in *height=27) printf '%s' "$CP_BEFORE" ;; *height=28) printf '%s' "$CP_AFTER" ;; esac; }
+    rehearsal_surface_block_max_gas >/dev/null 2>&1
+    jq -r '"\(.assertion)=\(.result)"' "$DRILL_ASSERT_LOG" | sort | paste -sd' ' -
+  )
+}
+result_of() { tr ' ' '\n' <<<"$2" | awk -F= -v a="$1" '$1 == a { print $2 }'; }
+
+GOOD="$(surface_case "$(cp_json 27 -1)" "$(cp_json 28 30000000)")"
+check "a correct boundary passes every assertion"   "0" "$(tr ' ' '\n' <<<"$GOOD" | grep -c '=FAIL$')"
+check "  and records all six"                       "6" "$(tr ' ' '\n' <<<"$GOOD" | grep -c '=PASS$')"
+EMPTY="$(surface_case "" "")"
+check "empty responses fail the max_bytes compare"  "FAIL" "$(result_of block_max_bytes_unchanged "$EMPTY")"
+check "  and the section compare"                   "FAIL" "$(result_of other_sections_unchanged "$EMPTY")"
+ERRBODY='{"jsonrpc":"2.0","id":-1,"error":{"code":-32603,"message":"internal error"}}'
+ERR="$(surface_case "$ERRBODY" "$ERRBODY")"
+check "an error body fails the section compare"     "FAIL" "$(result_of other_sections_unchanged "$ERR")"
+NOEV="$(surface_case "$(cp_json 27 -1 0 evidence)" "$(cp_json 28 30000000 0 evidence)")"
+check "a missing section fails the read"            "FAIL" "$(result_of consensus_params_read "$NOEV")"
+check "  and the section compare"                   "FAIL" "$(result_of other_sections_unchanged "$NOEV")"
+VER="$(surface_case "$(cp_json 27 -1 0)" "$(cp_json 28 30000000 5)")"
+check "a changed app version is caught"             "FAIL" "$(result_of other_sections_unchanged "$VER")"
+SAME="$(surface_case "$(cp_json 27 -1)" "$(cp_json 28 -1)")"
+check "max_gas left at -1 is caught"                "FAIL" "$(result_of block_max_gas_after_boundary "$SAME")"
+WRONGH="$(surface_case "$(cp_json 27 -1)" "$(cp_json 27 30000000)")"
+check "a response for the wrong height is caught"   "FAIL" "$(result_of consensus_params_heights "$WRONGH")"
+
 group "a failing run still writes a machine-readable verdict"
 
 # finalize_verdict is TERMINAL: it writes the verdict and then exits. So each case

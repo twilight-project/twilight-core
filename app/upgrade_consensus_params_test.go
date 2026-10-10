@@ -165,7 +165,10 @@ func TestSetBlockParamsPreservesTheVersionSection(t *testing.T) {
 // through CoreSlot from a binary that cannot run it, and rides to the halt at its
 // height. The sims defaults the other tests use already carry a finite max_gas and
 // no version or ABCI section, so they never exercise the path v0.4.0 will take.
-func chainHaltedAtUpgrade(t *testing.T, name string, height int64, versionApp uint64) (dbm.DB, string, cmtproto.ConsensusParams) {
+//
+// tweaks adjust the genesis params before they are sent, for a chain whose stored
+// values differ from the defaults.
+func chainHaltedAtUpgrade(t *testing.T, name string, height int64, versionApp uint64, tweaks ...func(*cmttypes.ConsensusParams)) (dbm.DB, string, cmtproto.ConsensusParams) {
 	t.Helper()
 	db := dbm.NewMemDB()
 	home := t.TempDir()
@@ -173,6 +176,9 @@ func chainHaltedAtUpgrade(t *testing.T, name string, height int64, versionApp ui
 	a := newAppWithHome(t, db, home)
 	defaults := cmttypes.DefaultConsensusParams()
 	defaults.Version.App = versionApp
+	for _, tweak := range tweaks {
+		tweak(defaults)
+	}
 	genesisParams := defaults.ToProto()
 	appState, err := json.Marshal(upgradeGenesisMap(t, a))
 	require.NoError(t, err)
