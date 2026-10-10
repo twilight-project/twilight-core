@@ -18,7 +18,7 @@
 
 # Every profile this repository can qualify. A profile not listed here does not
 # exist, even if a case below would load it.
-REHEARSAL_PROFILES=(v0.1.0-to-v0.2.0)
+REHEARSAL_PROFILES=(v0.1.0-to-v0.2.0 v0.3.1-to-v0.4.0)
 
 # The assertions every profile makes, keyed by (assertion, node) as drill-assert
 # records them. A profile adds its surface assertions to these; the total is the
@@ -59,6 +59,21 @@ rehearsal_profile_load() { # <name>
       PROFILE_SURFACE_SUMMARY="the candidate builds a real MsgNominateAuthority"
       PROFILE_SURFACE_MULTISET="nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1"
       PROFILE_SURFACE_FILES=(nomination-tx.json)
+      ;;
+    v0.3.1-to-v0.4.0)
+      # Ends unlimited block gas: the handler sets block.max_gas to the ratified
+      # ceiling through the consensus keeper (#170) and moves no module version.
+      # Starts from v0.3.1, the release operators hold when v0.4.0 is scheduled.
+      PROFILE_NAME="$name"
+      PROFILE_FROM_TAG="v0.3.1"
+      PROFILE_FROM_COMMIT="dd8a5e971ac80cdb3558393dd1dc7766e8ca5669"
+      PROFILE_UPGRADE_NAME="v0.4.0"
+      PROFILE_VERSION_MAP_AFTER="auth:5,bank:4,consensus:1,coreslot:2,mining:1,rewards:1,runtime:omitted-zero,upgrade:2"
+      PROFILE_STATE_SUMMARY="complete CoreSlot state identical; no module version moved"
+      PROFILE_SURFACE_FN=rehearsal_surface_block_max_gas
+      PROFILE_SURFACE_SUMMARY="CometBFT runs with block.max_gas 30000000 from H+1; max_bytes, evidence, validator, version and abci unchanged"
+      PROFILE_SURFACE_MULTISET="block_max_bytes_unchanged|-:1,block_max_gas_after_boundary|-:1,block_max_gas_before_boundary|-:1,consensus_params_heights|-:1,consensus_params_read|-:1,other_sections_unchanged|-:1"
+      PROFILE_SURFACE_FILES=(consensus-params.json)
       ;;
     *)
       # Listed but not defined: a defect in this file, not a caller error.
@@ -111,4 +126,52 @@ rehearsal_surface_authority_rotation() {
     "$(jq -r '.body.messages[0].role // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
   expect "nomination_carries_the_nominee" "$nominee" \
     "$(jq -r '.body.messages[0].nominee // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
+}
+
+# v0.4.0: CometBFT itself runs with the new block gas ceiling.
+#
+# Read from CometBFT's /consensus_params on an upgraded node, which is what CometBFT
+# adopted, not what the application wrote: the application could store a value
+# CometBFT never received. CometBFT saves the params a block's response carries
+# under the NEXT height, so /consensus_params?height=H is the last set it built
+# under (the old one, which built the upgrade block itself) and H+1 is the first
+# built under the new one.
+#
+# Fail closed. Every reader turns an empty, null or unparsable value into a marker
+# that differs between the two sides, so two unreadable responses can never compare
+# as equal; and the heights CometBFT answered for are checked, so a node that
+# served some other height cannot stand in for the boundary.
+_rehearsal_cp_field() { # <json> <jq path> <marker>
+  local v
+  v="$(jq -r "$2 // empty" <<<"$1" 2>/dev/null)"
+  if [[ -n "$v" ]]; then echo "$v"; else echo "$3"; fi
+}
+_rehearsal_cp_sections() { # <json> <marker> — evidence, validator, version, abci; none may be null
+  local v
+  v="$(jq -ce '.result.consensus_params | [.evidence, .validator, .version, .abci]
+               | if any(.[]; . == null) then error("a section is missing") else . end' <<<"$1" 2>/dev/null)"
+  if [[ -n "$v" ]]; then echo "$v"; else echo "$2"; fi
+}
+rehearsal_surface_block_max_gas() {
+  local before after readable=yes r
+  before="$(rpc_get 1 "/consensus_params?height=$UPGRADE_HEIGHT" 2>/dev/null)" || before=""
+  after="$(rpc_get 1 "/consensus_params?height=$((UPGRADE_HEIGHT + 1))" 2>/dev/null)" || after=""
+  for r in "$before" "$after"; do
+    jq -e '.result.consensus_params | (.block and .evidence and .validator and .version and .abci)' \
+      <<<"$r" >/dev/null 2>&1 || readable=no
+  done
+  expect "consensus_params_read" "yes" "$readable"
+  jq -n --arg b "$before" --arg a "$after" '{before: ($b | fromjson? // $b), after: ($a | fromjson? // $a)}' \
+    >"$DRILL_EVID_DIR/consensus-params.json" 2>/dev/null
+  expect "consensus_params_heights" "$UPGRADE_HEIGHT,$((UPGRADE_HEIGHT + 1))" \
+    "$(_rehearsal_cp_field "$before" '.result.block_height' MISSING),$(_rehearsal_cp_field "$after" '.result.block_height' MISSING)"
+  expect "block_max_gas_before_boundary" "-1" \
+    "$(_rehearsal_cp_field "$before" '.result.consensus_params.block.max_gas' MISSING)"
+  expect "block_max_gas_after_boundary" "30000000" \
+    "$(_rehearsal_cp_field "$after" '.result.consensus_params.block.max_gas' MISSING)"
+  expect "block_max_bytes_unchanged" \
+    "$(_rehearsal_cp_field "$before" '.result.consensus_params.block.max_bytes' MISSING-BEFORE)" \
+    "$(_rehearsal_cp_field "$after" '.result.consensus_params.block.max_bytes' MISSING-AFTER)"
+  expect "other_sections_unchanged" \
+    "$(_rehearsal_cp_sections "$before" MISSING-BEFORE)" "$(_rehearsal_cp_sections "$after" MISSING-AFTER)"
 }

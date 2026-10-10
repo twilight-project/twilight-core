@@ -9,6 +9,26 @@ import (
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 )
 
+// V040BlockMaxGas is the block gas ceiling the v0.4.0 upgrade installs. See the
+// v0.4.0 entry in upgrades.go for how it was chosen. It is a constant of a released
+// handler: once v0.4.0 is tagged it may never change, and a different value is a
+// later upgrade.
+const V040BlockMaxGas int64 = 30_000_000
+
+// SetBlockMaxGas sets block.max_gas and leaves block.max_bytes exactly as stored,
+// so a node's mempool bound, derived from max_bytes, stays correct. It is
+// SetBlockParams with the stored max_bytes, and fails the same way.
+func SetBlockMaxGas(ctx sdk.Context, k consensuskeeper.Keeper, maxGas int64) error {
+	stored, err := k.ParamsStore.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("read consensus params: %w", err)
+	}
+	if stored.Block == nil {
+		return fmt.Errorf("stored consensus params have no block section")
+	}
+	return SetBlockParams(ctx, k, stored.Block.MaxBytes, maxGas)
+}
+
 // SetBlockParams sets block.max_bytes and block.max_gas from inside an upgrade
 // handler (#170). It is the only way to change them on a running network: the
 // consensus module's authority is a keyless module account, so no transaction can.
