@@ -30,8 +30,8 @@ code is consensus- and value-critical, the bar for changes to `x/coreslot`, `x/r
 
 ## Development setup
 
-Builds with **Go 1.26.9**, the `toolchain` line in `go.mod`; with Go 1.25.13 or newer installed, the
-`go` command downloads it automatically. The `go` directive (1.25.13) is only the minimum for a module
+Builds with **Go 1.26.9**, the `toolchain` line in `go.mod`; with Go 1.26.0 or newer installed, the
+`go` command downloads it automatically. The `go` directive (1.26.0) is only the minimum for a module
 that imports this one.
 
 ```bash

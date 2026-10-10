@@ -4,7 +4,7 @@
 # (errcheck, govet, ineffassign, staticcheck, unused) are enabled implicitly.
 version: "2"
 run:
-  go: "1.25"
+  go: "1.26"
 linters:
   enable:
     - misspell

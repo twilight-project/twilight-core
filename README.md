@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/twilight-project/twilight-core?include_prereleases&sort=semver)](https://github.com/twilight-project/twilight-core/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/twilight-project/twilight-core.svg)](https://pkg.go.dev/github.com/twilight-project/twilight-core)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod)
 
 > [!WARNING]
 > **Public testnet, pre-1.0.** Twilight Core has **not been externally audited** and is
@@ -85,7 +85,7 @@ tools/            auxiliary tooling (the read-only dashboard)
 
 ## Prerequisites
 
-- **Go 1.25.13 or newer**, **make**, and **git** — to build and test. The build itself uses Go 1.26.9, the
+- **Go 1.26.0 or newer**, **make**, and **git** — to build and test. The build itself uses Go 1.26.9, the
   `toolchain` line in `go.mod`, which the `go` command downloads automatically.
 - **jq**, **curl**, and **lsof** — used by the localnet scripts and drills.
 - **protoc** — only if you regenerate protobuf (`make proto`).
