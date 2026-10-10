@@ -18,7 +18,7 @@
 
 # Every profile this repository can qualify. A profile not listed here does not
 # exist, even if a case below would load it.
-REHEARSAL_PROFILES=(v0.1.0-to-v0.2.0)
+REHEARSAL_PROFILES=(v0.1.0-to-v0.2.0 v0.3.1-to-v0.4.0)
 
 # The assertions every profile makes, keyed by (assertion, node) as drill-assert
 # records them. A profile adds its surface assertions to these; the total is the
@@ -59,6 +59,21 @@ rehearsal_profile_load() { # <name>
       PROFILE_SURFACE_SUMMARY="the candidate builds a real MsgNominateAuthority"
       PROFILE_SURFACE_MULTISET="nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1"
       PROFILE_SURFACE_FILES=(nomination-tx.json)
+      ;;
+    v0.3.1-to-v0.4.0)
+      # Ends unlimited block gas: the handler sets block.max_gas to the ratified
+      # ceiling through the consensus keeper (#170) and moves no module version.
+      # Starts from v0.3.1, the release operators hold when v0.4.0 is scheduled.
+      PROFILE_NAME="$name"
+      PROFILE_FROM_TAG="v0.3.1"
+      PROFILE_FROM_COMMIT="dd8a5e971ac80cdb3558393dd1dc7766e8ca5669"
+      PROFILE_UPGRADE_NAME="v0.4.0"
+      PROFILE_VERSION_MAP_AFTER="auth:5,bank:4,consensus:1,coreslot:2,mining:1,rewards:1,runtime:omitted-zero,upgrade:2"
+      PROFILE_STATE_SUMMARY="complete CoreSlot state identical; no module version moved"
+      PROFILE_SURFACE_FN=rehearsal_surface_block_max_gas
+      PROFILE_SURFACE_SUMMARY="CometBFT runs with block.max_gas 30000000 from the boundary; max_bytes and the other sections unchanged"
+      PROFILE_SURFACE_MULTISET="block_max_bytes_unchanged|-:1,block_max_gas_after_boundary|-:1,block_max_gas_before_boundary|-:1,consensus_params_read|-:1,evidence_and_validator_unchanged|-:1"
+      PROFILE_SURFACE_FILES=(consensus-params.json)
       ;;
     *)
       # Listed but not defined: a defect in this file, not a caller error.
@@ -111,4 +126,35 @@ rehearsal_surface_authority_rotation() {
     "$(jq -r '.body.messages[0].role // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
   expect "nomination_carries_the_nominee" "$nominee" \
     "$(jq -r '.body.messages[0].nominee // "MISSING"' "$DRILL_EVID_DIR/nomination-tx.json" 2>/dev/null)"
+}
+
+# v0.4.0: CometBFT itself runs with the new block gas ceiling.
+#
+# Read from CometBFT's /consensus_params at heights either side of the boundary on
+# an upgraded node, which is what CometBFT adopted, not what the application wrote:
+# the application could store a value CometBFT never received. H-1 is the last
+# height under the old params; H+1 is the first CometBFT builds under the new ones.
+# Every reader falls back to MISSING, never to a number, so an unreadable response
+# fails rather than comparing two blanks as equal.
+rehearsal_surface_block_max_gas() {
+  local before after ok=yes
+  before="$(rpc_get 1 "/consensus_params?height=$((UPGRADE_HEIGHT - 1))" 2>/dev/null)" || before=""
+  after="$(rpc_get 1 "/consensus_params?height=$((UPGRADE_HEIGHT + 1))" 2>/dev/null)" || after=""
+  jq -e '.result.consensus_params.block' <<<"$before" >/dev/null 2>&1 || ok=no
+  jq -e '.result.consensus_params.block' <<<"$after" >/dev/null 2>&1 || ok=no
+  expect "consensus_params_read" "yes" "$ok"
+  jq -n --arg b "$before" --arg a "$after" '{before: ($b | fromjson? // $b), after: ($a | fromjson? // $a)}' \
+    >"$DRILL_EVID_DIR/consensus-params.json" 2>/dev/null
+  local field='.result.consensus_params'
+  expect "block_max_gas_before_boundary" "-1" \
+    "$(jq -r "$field.block.max_gas // \"MISSING\"" <<<"$before" 2>/dev/null || echo MISSING)"
+  expect "block_max_gas_after_boundary" "30000000" \
+    "$(jq -r "$field.block.max_gas // \"MISSING\"" <<<"$after" 2>/dev/null || echo MISSING)"
+  local bytes_before bytes_after
+  bytes_before="$(jq -r "$field.block.max_bytes // \"MISSING-BEFORE\"" <<<"$before" 2>/dev/null || echo MISSING-BEFORE)"
+  bytes_after="$(jq -r "$field.block.max_bytes // \"MISSING-AFTER\"" <<<"$after" 2>/dev/null || echo MISSING-AFTER)"
+  expect "block_max_bytes_unchanged" "$bytes_before" "$bytes_after"
+  expect "evidence_and_validator_unchanged" \
+    "$(jq -c "[$field.evidence, $field.validator]" <<<"$before" 2>/dev/null || echo MISSING-BEFORE)" \
+    "$(jq -c "[$field.evidence, $field.validator]" <<<"$after" 2>/dev/null || echo MISSING-AFTER)"
 }

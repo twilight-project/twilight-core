@@ -161,6 +161,33 @@ var Upgrades = []Upgrade{
 		// reconcile before the tag — after release the entry may never be edited.
 		Name: "v0.3.0",
 	},
+	{
+		// Ends unlimited block gas (TW-004, #147). Every network so far launched with
+		// block.max_gas = -1, and no transaction can change it (#167); #170 made it
+		// reachable from a handler, and this is the first handler to use it.
+		//
+		// V040BlockMaxGas is a ceiling chosen from what legitimate traffic needs, not
+		// from what the hardware can execute in a block time: the heaviest legitimate
+		// transaction (a 32-new-recipient settlement chunk) declares ~1.6 M at the
+		// CLI's 1.5x margin, so 30 M is ~18x that and holds ~18 such chunks or ~255
+		// simple sends per block. #160 and #107 measure capacity; a later upgrade can
+		// move the value either way.
+		//
+		// max_bytes is written back as stored, so no operator's mempool bound
+		// (cmd/twilightd/cmd/root.go, nodeConfig) goes stale. Note when the value
+		// binds: the application holds the upgrade block's OWN transactions to the
+		// new max_gas (x/upgrade reports ConsensusParamsChanged and BaseApp rebuilds
+		// the block gas meter), while CometBFT applies it to proposals from the next
+		// block.
+		//
+		// No StoreUpgrades and no module version moves:
+		// TestThisReleaseMovesNoModuleVersionAndMountsNoNewModule still pins the
+		// whole map. The Migrate is the entire chain-specific change.
+		Name: "v0.4.0",
+		Migrate: func(ctx sdk.Context, k MigrationKeepers) error {
+			return SetBlockMaxGas(ctx, k.Consensus, V040BlockMaxGas)
+		},
+	},
 }
 
 // ValidateUpgrades rejects a registry that cannot be executed unambiguously.
