@@ -32,8 +32,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # dependency uses runtime internals that changed there. The gate then exited
 # non-zero having scanned nothing, which reads like a finding and is not one.
 #
-# Derived from go.mod rather than written down again, so the two cannot drift.
-GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "${ROOT}/go.mod")"
+# Derived from go.mod rather than written down again, so the two cannot drift. The
+# repository builds with go.mod's `toolchain` line when it has one and with the `go`
+# directive otherwise: the `go` directive is the minimum an importer of this module
+# needs, the `toolchain` line is what this repository compiles, tests and releases
+# with. The scan has to see the standard library the release ships, so the
+# toolchain line wins. A toolchain line that is present but not a full version is
+# refused rather than skipped, or the scan would fall back to the older compiler
+# without saying so.
+if grep -q '^toolchain' "${ROOT}/go.mod"; then
+  GO_VERSION="$(awk '/^toolchain go[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^go/, "", $2); print $2; exit }' "${ROOT}/go.mod")"
+  if [[ -z "${GO_VERSION}" ]]; then
+    echo "vulncheck: go.mod's toolchain line is not a full version (toolchain go1.N.P)" >&2
+    exit 2
+  fi
+else
+  GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "${ROOT}/go.mod")"
+fi
 if [[ -z "${GO_VERSION}" ]]; then
   echo "vulncheck: could not read the go directive from go.mod" >&2
   exit 2

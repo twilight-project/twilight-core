@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Checks that the vulnerability gate runs under the Go version go.mod declares.
+# Checks that the vulnerability gate runs under the toolchain go.mod declares: the
+# `toolchain` line when there is one, otherwise the `go` directive.
 #
 # scripts/vulncheck.sh pins the govulncheck VERSION and, since #117, the
 # TOOLCHAIN as well. Ordinary CI cannot detect the loss of the second:
@@ -33,11 +34,15 @@ trap 'rm -rf "$WORK"' EXIT
 
 # --- the expected value, read independently of the production extractor -------
 #
-# Production uses awk on the `go` directive. This uses sed on the same line, so a
-# broken production expression cannot make the two agree by construction.
-EXPECTED_GO="$(sed -n 's/^go[[:space:]]\{1,\}\([0-9][0-9.]*\)[[:space:]]*$/\1/p' "$ROOT/go.mod" | head -1)"
+# Production uses awk. This uses sed on the same lines — the toolchain line first,
+# then the go directive — so a broken production expression cannot make the two
+# agree by construction.
+EXPECTED_GO="$(sed -n 's/^toolchain[[:space:]]\{1,\}go\([0-9][0-9.]*\)[[:space:]]*$/\1/p' "$ROOT/go.mod" | head -1)"
 if [[ -z "$EXPECTED_GO" ]]; then
-  echo "refusing to run: could not read the go directive from go.mod" >&2
+  EXPECTED_GO="$(sed -n 's/^go[[:space:]]\{1,\}\([0-9][0-9.]*\)[[:space:]]*$/\1/p' "$ROOT/go.mod" | head -1)"
+fi
+if [[ -z "$EXPECTED_GO" ]]; then
+  echo "refusing to run: could not read the toolchain line or go directive from go.mod" >&2
   exit 2
 fi
 EXPECTED="go${EXPECTED_GO}"
@@ -87,28 +92,46 @@ echo
 echo "=== a go.mod it cannot read is refused, not guessed ==="
 # Run against a copy of the tree whose go directive is missing or malformed. The
 # script derives the version from ROOT/go.mod, so ROOT has to move with it.
-setup_broken_root() { # <go.mod first line> -> prints a root path
+setup_broken_root() { # <go.mod lines, \n-separated> -> prints a root path
   local directive="$1" dir
-  dir="$WORK/broken-$RANDOM"
+  dir="$WORK/root-$RANDOM"
   mkdir -p "$dir/scripts"
   cp "$ROOT/scripts/vulncheck.sh" "$dir/scripts/"
   cp "$ROOT/.govulncheck-allow.json" "$dir/" 2>/dev/null || true
-  printf '%s\nmodule example.com/x\n' "$directive" > "$dir/go.mod"
+  printf '%b\nmodule example.com/x\n' "$directive" > "$dir/go.mod"
   echo "$dir"
 }
+run_gate_in() { # <root> -> prints the recorded GOTOOLCHAIN
+  export FAKE_GO_RECORD="$WORK/recorded-in"
+  : > "$FAKE_GO_RECORD"
+  PATH="$WORK/bin:$PATH" GOTOOLCHAIN=go1.99.0 "$1/scripts/vulncheck.sh" ./... >/dev/null 2>&1
+  cat "$FAKE_GO_RECORD" 2>/dev/null
+}
 
-for label in "missing:module example.com/x" "malformed:go not-a-version"; do
+for label in "missing:module example.com/x" "malformed:go not-a-version" \
+             "malformed toolchain:go 1.25.13\ntoolchain go-not-a-version"; do
   name="${label%%:*}"; directive="${label#*:}"
   dir="$(setup_broken_root "$directive")"
   export FAKE_GO_RECORD="$WORK/recorded-$name"
   : > "$FAKE_GO_RECORD"
   PATH="$WORK/bin:$PATH" GOTOOLCHAIN=go1.26.0 "$dir/scripts/vulncheck.sh" ./... >/dev/null 2>&1
   rc=$?
-  check "a $name go directive exits non-zero" "nonzero" \
+  check "a $name go.mod exits non-zero" "nonzero" \
     "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
   check "  ...and runs no scan"               "yes" \
     "$([[ ! -s "$FAKE_GO_RECORD" ]] && echo yes || echo no)"
 done
+
+echo
+echo "=== the toolchain line, not the minimum, is what the gate scans under ==="
+# The go directive is the minimum an importer needs; the toolchain line is what
+# this repository builds and releases with. The scan must see the latter's
+# standard library, or a stdlib advisory fixed only in the newer toolchain stays red
+# while the release ships the fix — or the reverse.
+check "toolchain line wins over the go directive" "go1.26.9" \
+  "$(run_gate_in "$(setup_broken_root 'go 1.25.13\ntoolchain go1.26.9')")"
+check "without one, the go directive is used"     "go1.25.13" \
+  "$(run_gate_in "$(setup_broken_root 'go 1.25.13')")"
 
 echo
 if (( FAILED > 0 )); then

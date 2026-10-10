@@ -85,7 +85,8 @@ tools/            auxiliary tooling (the read-only dashboard)
 
 ## Prerequisites
 
-- **Go 1.25.x** (the version pinned in `go.mod`), **make**, and **git** — to build and test.
+- **Go 1.25.13 or newer**, **make**, and **git** — to build and test. The build itself uses Go 1.26.9, the
+  `toolchain` line in `go.mod`, which the `go` command downloads automatically.
 - **jq**, **curl**, and **lsof** — used by the localnet scripts and drills.
 - **protoc** — only if you regenerate protobuf (`make proto`).
 - **Node.js + npm** — only to build the documentation site under `website/`.

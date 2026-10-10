@@ -205,16 +205,26 @@ find "$(dirname "$OUT")" -maxdepth 1 -type d -name '.release-staging.*' -mmin +6
 
 git archive HEAD | tar -x -C "$SRC" || refuse "could not export HEAD"
 
-# The toolchain is pinned to the commit's own go directive. Under the default
+# The toolchain is pinned to the commit's own go.mod. Under the default
 # GOTOOLCHAIN=auto the build uses the newer of the host's go and go.mod's, so
 # two maintainers with different local Go versions produced different binaries
 # for the same tag. It is read from the exported go.mod, like everything else a
-# release is built from, and third-party-notices.sh inherits it. (A `toolchain`
-# line in go.mod would not pin anything under auto, and `go mod tidy` removes it
-# when it equals the go directive.)
-GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "$SRC/go.mod")"
+# release is built from, and third-party-notices.sh inherits it.
+#
+# The `toolchain` line names the compiler this repository builds and releases
+# with; the `go` directive is only the minimum an importer needs. So a release
+# uses the toolchain line when there is one and the go directive otherwise. Under
+# auto a toolchain line alone would not pin anything, which is why the version is
+# exported explicitly here rather than left to the go command.
+if grep -q '^toolchain' "$SRC/go.mod"; then
+  GO_VERSION="$(awk '/^toolchain / { sub(/^go/, "", $2); print $2; exit }' "$SRC/go.mod")"
+  WHICH="toolchain line"
+else
+  GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "$SRC/go.mod")"
+  WHICH="go directive"
+fi
 [[ "$GO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+)?$ ]] \
-  || refuse "the committed go.mod must name a full toolchain version in its go directive (1.N.P), to pin the build to one; found '$GO_VERSION'"
+  || refuse "the committed go.mod's $WHICH must name a full toolchain version (1.N.P), to pin the build to one; found '$GO_VERSION'"
 export GOTOOLCHAIN="go$GO_VERSION"
 
 # The binaries statically link third-party modules whose licenses must travel with

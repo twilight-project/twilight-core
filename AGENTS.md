@@ -30,7 +30,8 @@ Denominations: base **`utwlt`** (accounting), display **`twlt`** (`TWLT`, 6 deci
 
 ## Setup & verify
 
-Requires **Go 1.25.x** (see `go.mod`). Run these before pushing — they run the same
+Builds with **Go 1.26.9** (`go.mod`'s `toolchain` line, fetched automatically by Go 1.25.13 or newer;
+the `go` directive is only the minimum for importers). Run these before pushing — they run the same
 checks CI enforces (the `make` targets are the local shorthand; CI is the source of
 truth and differs in a few ways noted inline):
 
