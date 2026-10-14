@@ -1,7 +1,6 @@
 package types
 
 import (
-	"fmt"
 	"strings"
 
 	sdkmath "cosmossdk.io/math"
@@ -292,8 +291,4 @@ func validateEpochReward(epoch *EpochReward) error {
 
 func invalidDuplicate(kind string, values ...uint64) error {
 	return ErrInvalidGenesis.Wrapf("duplicate %s %v", kind, values)
-}
-
-func claimKey(slotID, epoch uint64) string {
-	return fmt.Sprintf("%d/%d", slotID, epoch)
 }
