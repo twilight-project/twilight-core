@@ -39,8 +39,8 @@ and why the left-hand column must never be used for it.
 1. The plan is committed. From that block until the height, a node that is **already**
    running a binary containing the named handler aborts every block it tries to
    process. Do not swap early.
-2. At the height, every node refuses the block: the process stays up and answers RPC,
-   but its application height stops. A validator left on the old binary stays stopped
+2. At the height, every node refuses the block. The process usually stays up and
+   answers RPC, but its application height stops. A validator left on the old binary stays stopped
    rather than following the network with the old logic.
 3. Each operator starts the new binary. It runs the handler once, in a cache context
    that commits only on complete success, then continues.
@@ -51,6 +51,28 @@ and why the left-hand column must never be used for it.
 The settlement clock advances only on blocks that are produced, so a halt freezes every
 open settlement window. Nothing expires while the network is down, however long that is.
 
+### A halted node can look healthy
+
+A node halted at the upgrade height often keeps its process up and keeps answering
+`/status`. There it reports `catching_up: false`, with a `latest_block_height` that has
+stopped. A validator that missed the swap therefore passes the usual health checks
+(process running, RPC answering, not catching up) while it is permanently stopped. On some
+paths the process exits instead. Don't rely on either behaviour.
+
+What does show it is the height: compare yours with a node you know is on the network.
+
+```bash
+PEER_RPC="http://<known-good-rpc>:26657"   # another validator, or a public RPC endpoint
+for rpc in http://localhost:26657 "$PEER_RPC"; do
+  curl -s "$rpc/status" | jq -r '.result.sync_info.latest_block_height'
+done
+```
+
+A height that stays put while the peer's moves, together with `catching_up: false`, means
+halted, not synced. During the halt itself both heights stay put; once the network
+resumes, a node still stuck at the upgrade height needs the new binary. Check this after
+every swap.
+
 ### Operator procedure
 
 - Run `twilightd` under Cosmovisor, with `DAEMON_ALLOW_DOWNLOAD_BINARIES=false`. A node
@@ -59,7 +81,8 @@ open settlement window. Nothing expires while the network is down, however long 
   checksums, and place it where Cosmovisor expects the binary for the plan's name. Do
   not run it.
 - After the swap: confirm `query upgrade applied <name>` returns the upgrade height, that
-  your node's application hash matches its peers, and that it is signing again.
+  your node's height advances with its peers' (see above) and its application hash
+  matches theirs, and that it is signing again.
 - `--unsafe-skip-upgrades <height>` makes a node skip a plan. It is a network-wide
   decision: a node that uses it alone computes different state from the rest and forks.
 

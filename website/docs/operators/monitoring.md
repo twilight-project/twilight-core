@@ -334,6 +334,12 @@ expires with it, so each stall alert above returns *no data* — not a firing
 condition — during a full halt; this alert is what fires then, and it is not
 optional alongside them.
 
+An RPC poll does not replace it. A node halted at an upgrade height can keep answering
+`/status` with `catching_up: false` while its height has stopped, so "process up, RPC
+answering, not catching up" reads as healthy. A check from outside Prometheus has to
+compare the node's height with its peers' (see
+[A halted node can look healthy](./upgrade-and-export-import.md#a-halted-node-can-look-healthy)).
+
 ## Signals via queries
 
 The same state is available through the CLI for one-off inspection, and for values
