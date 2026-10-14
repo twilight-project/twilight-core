@@ -480,8 +480,12 @@ finish() {
     # claims. Keyed on the name alone, a count of four is satisfied by any split, so a
     # lost node-3 check paired with a double-counted node would balance out. Keyed on
     # the node it does not: every one of the 99 keys is expected exactly once.
-    observed="$(jq -r '"\(.assertion)|\(.node)"' "$UPGRADE_LOG" 2>/dev/null | sort | uniq -c \
-                | awk '{printf "%s:%s\n", $2, $1}' | sort | paste -sd, - 2>/dev/null)"
+    #
+    # Both sorts are pinned to C collation, the order EXPECTED_ASSERT_MULTISET is
+    # written in. Under en_US, for one, "clock_tick_at_H|" sorts before
+    # "clock_tick_at_H_plus_1|", so an unpinned sort failed a correct run.
+    observed="$(jq -r '"\(.assertion)|\(.node)"' "$UPGRADE_LOG" 2>/dev/null | LC_ALL=C sort | uniq -c \
+                | awk '{printf "%s:%s\n", $2, $1}' | LC_ALL=C sort | paste -sd, - 2>/dev/null)"
     if [[ "$observed" != "$EXPECTED_ASSERT_MULTISET" ]]; then
       echo "  FAIL: the assertion multiset does not match the proof contract" >&2
       diff <(tr ',' '\n' <<<"$EXPECTED_ASSERT_MULTISET") <(tr ',' '\n' <<<"$observed") >&2 || true
@@ -643,7 +647,7 @@ if (( TOPO_OK == 1 )); then
 else
   fail "topology could not be read; the quorum argument is unproven"
 fi
-phase_end "topology" "slots=$SLOTS_ACTIVE validators=${VAL_COUNT:-?} power=${VAL_MIN:-?}..${VAL_MAX:-?}"
+phase_end "topology" "slots=${SLOTS_ACTIVE:-?} validators=${VAL_COUNT:-?} power=${VAL_MIN:-?}..${VAL_MAX:-?}"
 
 echo
 phase_begin
@@ -689,7 +693,7 @@ else fail "H=$UPGRADE_HEIGHT is too close to an epoch boundary"; record_assert -
 if (( UPGRADE_HEIGHT < DEADLINE )); then ok "H precedes the settlement deadline (clock $DEADLINE)"
   record_assert - "H_before_settlement_deadline" "<$DEADLINE" "$UPGRADE_HEIGHT" PASS
 else fail "the settlement would expire before H"; record_assert - "H_before_settlement_deadline" "<$DEADLINE" "$UPGRADE_HEIGHT" FAIL; fi
-phase_end "geometry" "epoch=$EPOCH_LEN H=$UPGRADE_HEIGHT deadline=$DEADLINE"
+phase_end "geometry" "epoch=${EPOCH_LEN:-?} H=${UPGRADE_HEIGHT:-?} deadline=${DEADLINE:-?}"
 
 echo
 phase_begin
@@ -713,7 +717,7 @@ for n in 0 1 2 3; do
   expect "pending_plan_name" "$UPGRADE_NAME" "$PNAME" "$n"
   expect "pending_plan_height" "$UPGRADE_HEIGHT" "$PHEIGHT" "$n"
 done
-phase_end "schedule" "tx=$TXHASH name=$UPGRADE_NAME H=$UPGRADE_HEIGHT"
+phase_end "schedule" "tx=${TXHASH:-?} name=$UPGRADE_NAME H=${UPGRADE_HEIGHT:-?}"
 
 echo
 phase_begin
@@ -742,7 +746,7 @@ jq -nc --arg cp "baseline_pre_halt" --argjson h "$BASE_H" --arg krd "$KRD_BEFORE
   '{checkpoint:$cp, height:$h, key_rotation_delay_blocks:$krd, escrow:$esc, liability:$li,
     carry:$ca, settlement_slot:$slot, settlement_epoch:$ep, deadline_clock:$dl,
     measured_tick_per_block:$tick}' >>"$ECONOMICS" || die "could not write the baseline checkpoint"
-phase_end "baseline" "tick=$EXPECTED_TICK krd=$KRD_BEFORE escrow=$ESCROW"
+phase_end "baseline" "tick=${EXPECTED_TICK:-?} krd=${KRD_BEFORE:-?} escrow=${ESCROW:-?}"
 
 echo
 phase_begin

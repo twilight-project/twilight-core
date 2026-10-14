@@ -79,6 +79,10 @@ start_node() {
 # stopped. So a halted node commonly reads as alive here. Use this to tell an
 # expected halt from a process that actually died; use the committed application
 # height to tell whether the chain is making progress.
+#
+# It trusts the PID file: it does not check that the PID still belongs to this
+# node's twilightd. A caller that needs that identity uses a drill-local wrapper,
+# as the upgrade drill's drill_node_alive does.
 node_alive() {
   local i="$1" pidfile="$NET/node$1.pid"
   [[ -f "$pidfile" ]] || return 1
