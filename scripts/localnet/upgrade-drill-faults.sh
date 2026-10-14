@@ -85,6 +85,9 @@ printf '%s' "$FIXTURE_BODY"
 exit "${FIXTURE_RC:-0}"
 STUBEOF
 chmod +x "$STUB"
+# BIN_B is saved and restored around this group, so the identity group below
+# checks the drill's real binary B path rather than this stub's.
+REAL_BIN_B="$BIN_B"
 BIN_B="$STUB"
 rpc_url() { echo "http://127.0.0.1:1"; }
 export FIXTURE_BODY FIXTURE_RC
@@ -96,6 +99,7 @@ check "exit 0, zero bytes"            "1:"                 "$(fetch '' 0)"
 check "delegates: canonical absence"  "0:none"             "$(fetch '{"plan":null}' 0)"
 check "delegates: pending plan"       "0:pending:drill-v2" "$(fetch '{"plan":{"name":"drill-v2"}}' 0)"
 check "delegates: unknown object"     "1:"                 "$(fetch '{"unexpected":1}' 0)"
+BIN_B="$REAL_BIN_B"
 
 # ---------------------------------------------------------------------------
 group b1-reads "B1 — an unusable read may never become a number"
@@ -331,6 +335,19 @@ printf '%s\n' \
   '{"assertion":"migration_applied","node":"3"}' >"$D/upgrade.jsonl"
 check "the correct fan-out still passes"   "0:PASS" "$(run_finish "$D" "$NODE_CONTRACT" 4 15)"
 
+# The contract is written in C collation. Under en_US these two keys sort the
+# other way round, so a finish() that sorted under the caller's locale failed a
+# correct run. The first check proves the locale really does reorder them, so the
+# second cannot pass just because en_US is missing and sort fell back to C.
+LOCALE_CONTRACT="clock_tick_at_H_plus_1|-:1,clock_tick_at_H|-:1"
+check "en_US orders the keys differently"  "clock_tick_at_H|-:1" \
+  "$(printf '%s\n' "clock_tick_at_H_plus_1|-:1" "clock_tick_at_H|-:1" | LC_ALL=en_US.UTF-8 sort 2>/dev/null | head -1)"
+D="$TMP/e10"; mk_evidence "$D"
+printf '%s\n' \
+  '{"assertion":"clock_tick_at_H","node":"-"}' \
+  '{"assertion":"clock_tick_at_H_plus_1","node":"-"}' >"$D/upgrade.jsonl"
+check "a correct run passes under en_US"   "0:PASS" "$(LC_ALL=en_US.UTF-8 run_finish "$D" "$LOCALE_CONTRACT" 2 15)"
+
 # ---------------------------------------------------------------------------
 echo
 echo "=== per-group counts ==="
@@ -344,7 +361,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 # An exact count, for the same reason the drill pins its assertion multiset: an
 # approximate target lets a silently-dropped case pass unnoticed, which is the very
 # defect this file exists to catch.
-EXPECTED_CHECKS=125
+EXPECTED_CHECKS=127
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "upgrade drill negative tests: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2
