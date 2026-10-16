@@ -83,12 +83,30 @@ already see it; there is no queue.
 | `emergency_authority` | genesis | The same, with role `emergency`. |
 | `slot_voting_power` | `1` | Positive; cannot change while any slot is ACTIVE; `max_active_slots × slot_voting_power` must fit in a signed 64-bit integer. |
 | `min_active_slots` | `1` | At least 1 and at most `max_active_slots`. Inactivation, and suspension unless allowed below, refuse to take the active set below it. |
-| `max_active_slots` | `100` | At least `min_active_slots`, at most 100 (an immutable ceiling). |
+| `max_active_slots` | `100` | At least `min_active_slots`, at most 100 (an immutable ceiling). Activation is refused once the active set has reached it. |
 | `key_rotation_delay_blocks` | `1` | Blocks between a rotation request and the key switch. |
 | `consensus_key_reuse_lockout` | `100000` | Blocks for which a retired consensus key cannot be reused. |
 | `allow_emergency_below_min_active` | `false` | When `true`, a suspension by either authority may take the active set below `min_active_slots`, but never below one active slot. At the default minimum of 1 it changes nothing. |
 | `selection_policy_update_cooldown_blocks` | `720` | At least 360 (an immutable minimum): the spacing between an operator's selection-policy updates. |
 | `activation_delay_blocks`, `removal_delay_blocks`, `allow_self_registration` | `0`, `0`, `false` | Deprecated; validation requires exactly these values. |
+
+### Changing the slot bounds
+
+An update to `min_active_slots` or `max_active_slots` is checked against the other bound
+and the immutable ceiling, **not against how many slots are ACTIVE now**. Neither change
+moves a slot:
+
+- **Lowering `max_active_slots` below the active count evicts nobody.** Every ACTIVE slot
+  stays active. Activation is refused until enough slots have left, by inactivation or
+  suspension, that the count is below the new cap. There is no waiting list:
+  once there is room, the authority activates a waiting slot itself.
+- **Raising `min_active_slots` above the active count** makes inactivation, and suspension
+  unless `allow_emergency_below_min_active` is set, refuse until enough slots are activated
+  to meet it. Nothing activates a slot automatically.
+
+So the active count can sit outside `[min_active_slots, max_active_slots]` until the set
+catches up. To stop new admissions without going below the current set, set
+`max_active_slots` to the current active count, then lower it further as slots leave.
 
 Read the current record with `coreslot-query params`.
 

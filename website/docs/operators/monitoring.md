@@ -213,7 +213,7 @@ tracked separately.
 
 | Metric | Labels | Meaning | Healthy |
 |---|---|---|---|
-| `twilight_coreslot_active_slots` | | Number of ACTIVE CoreSlots (the validator set size) | `min_active_slots ≤ active ≤ max_active_slots`; changes only on a lifecycle transition |
+| `twilight_coreslot_active_slots` | | Number of ACTIVE CoreSlots (the validator set size) | changes only on a lifecycle transition; at least 1 and never above 100. Usually `min_active_slots ≤ active ≤ max_active_slots`, but it can sit above the cap while a lowered cap drains, or below the minimum after the minimum is raised or an emergency suspension ([why](../rewards/params.md#changing-the-slot-bounds)) |
 | `twilight_coreslot_min_active_slots` | | Parameter | constant between parameter updates |
 | `twilight_coreslot_max_active_slots` | | Parameter | constant between parameter updates |
 | `twilight_coreslot_pending_key_rotations` | | Consensus-key rotations queued and not yet effective | 0 except during a rotation |
