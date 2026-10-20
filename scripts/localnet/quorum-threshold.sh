@@ -46,17 +46,26 @@ export BIN NET TWILIGHT_LOCALNET_HOME="$NET"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 2; }; }
 need curl
-need python3
+need jq
 
 rpc_port() { echo $((26657 + $1 * 100)); }
+# The filters are the guards, not the flags. select(test("^[0-9]+\\z")) lets only
+# a string of decimal digits through (CometBFT sends heights as decimal strings;
+# leading zeros are normalised, so "010" reads as 10), and arrays emits nothing
+# for a missing, null or non-array validator list. A reader that gets no usable
+# answer therefore prints nothing, and the callers see "" — never a height,
+# never a count. A bare .field would print "null", and "null | length" is 0,
+# which would make a node with no answer look like a chain with no validators.
+# Here -e only turns "no output" into a non-zero exit, which the || echo ""
+# absorbs; it is kept for consistency with some of the other RPC readers.
 height_of() {
   curl -fsS "http://127.0.0.1:$(rpc_port "$1")/status" 2>/dev/null \
-    | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['sync_info']['latest_block_height'])" 2>/dev/null \
+    | jq -er '.result.sync_info.latest_block_height | tostring | select(test("^[0-9]+\\z")) | tonumber' 2>/dev/null \
     || echo ""
 }
 validator_count() {
   curl -fsS "http://127.0.0.1:$(rpc_port "$1")/validators" 2>/dev/null \
-    | python3 -c "import json,sys;print(len(json.load(sys.stdin)['result']['validators']))" 2>/dev/null \
+    | jq -er '.result.validators | arrays | length' 2>/dev/null \
     || echo ""
 }
 
