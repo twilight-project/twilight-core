@@ -1,0 +1,6 @@
+# Code owners for twilight-core.
+#
+# Every pull request requests a review from these owners, and an approval from
+# either one satisfies a "Require review from Code Owners" rule. Owners must
+# keep write access to the repository; GitHub ignores an owner without it.
+*       @usmanshahid86 @runnerelectrode
