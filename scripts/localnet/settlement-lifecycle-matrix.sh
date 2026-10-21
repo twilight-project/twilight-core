@@ -74,6 +74,9 @@ fi
 if pgrep -f "make drills" >/dev/null 2>&1; then
   echo "a drill run is already in progress; wait for it" >&2; exit 2
 fi
+# The port check comes BEFORE the trap: the trap stops every twilightd on the
+# machine, and a refusal must not take down the very node it refused for.
+require_free_ports 3 || { echo "refusing to start" >&2; exit 2; }
 trap '"$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true; pkill -f "twilightd start" >/dev/null 2>&1 || true' EXIT
 
 # `|| true` is load-bearing: a query for state that does not exist is a normal

@@ -33,6 +33,9 @@ if pgrep -x twilightd >/dev/null 2>&1; then
   echo "a twilightd process is already running; stop it first" >&2
   exit 2
 fi
+# The port check comes BEFORE the trap: the trap stops every twilightd on the
+# machine, and a refusal must not take down the very node it refused for.
+require_free_ports 4 || { echo "refusing to start" >&2; exit 2; }
 trap '"$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true; pkill -f "twilightd start" >/dev/null 2>&1 || true' EXIT
 
 cometbft_set() { rpc_get "${1:-0}" /validators 2>/dev/null | jq -r '(.result.validators // []) | length' 2>/dev/null || echo ""; }

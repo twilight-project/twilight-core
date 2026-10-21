@@ -52,6 +52,8 @@ if [[ -e "$DRILL_EVID_DIR" ]]; then
   echo "refusing to run: $DRILL_EVID_DIR already exists; use a fresh RUN_ID" >&2
   exit 2
 fi
+# Before the evidence directory exists: a refusal leaves nothing behind.
+require_free_ports "$NODE_COUNT" || { echo "refusing to start" >&2; exit 2; }
 drill_assert_init "$DRILL_EVID_DIR" || { echo "could not initialise evidence" >&2; exit 2; }
 
 # The codespace-2 error registered as ErrUnauthorized. Asserted by value, not as

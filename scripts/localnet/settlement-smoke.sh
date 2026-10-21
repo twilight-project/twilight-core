@@ -28,6 +28,7 @@ set -euo pipefail
 # stopped enforcing every rule below.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 BIN="${BIN:-$ROOT/build/twilightd}"
 NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-settlement-localnet}"
 CHAIN_ID="${CHAIN_ID:-twilight-settlement-localnet-1}"
@@ -57,8 +58,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-rpc_url() { echo "tcp://127.0.0.1:$((26657 + $1 * 100))"; }
-http_url() { echo "http://127.0.0.1:$((26657 + $1 * 100))"; }
+rpc_url() { echo "tcp://127.0.0.1:$(rpc_port "$1")"; }
+http_url() { echo "http://127.0.0.1:$(rpc_port "$1")"; }
 latest_height() {
   curl -fsS "$(http_url "$1")/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height | tonumber' 2>/dev/null || echo 0
 }
@@ -153,7 +154,7 @@ assert_settlement_unchanged() { # <label> <expected-next-index> <expected-releas
 # Refuse to run beside another localnet.
 #
 # Every localnet script here binds the same ports, so a node left over from an
-# interrupted run keeps answering on :26657 while this one initializes its own
+# interrupted run keeps answering on node 0's RPC port while this one initializes its own
 # chain. The transactions then land somewhere this script is not looking, and the
 # result is not a failure — it is a PASS or a failure that describes a different
 # chain. That is worth aborting for: a money proof whose isolation is unverified

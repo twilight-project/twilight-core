@@ -16,6 +16,7 @@ set -uo pipefail
 # unattended on a dedicated host.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 BIN="${BIN:-$ROOT/build/twilightd}"
 NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-rewards-soak}"
 CHAIN_ID="${CHAIN_ID:-twilight-rewards-soak-1}"
@@ -65,8 +66,8 @@ HALTED=0
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 2; }; }
 need curl; need jq
 
-rpc_url()  { echo "tcp://127.0.0.1:$((26657 + $1 * 100))"; }
-http_url() { echo "http://127.0.0.1:$((26657 + $1 * 100))"; }
+rpc_url()  { echo "tcp://127.0.0.1:$(rpc_port "$1")"; }
+http_url() { echo "http://127.0.0.1:$(rpc_port "$1")"; }
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 human() { awk -v b="${1:-0}" 'BEGIN{u="B";s=b;if(s>=1024){s/=1024;u="KB"}if(s>=1024){s/=1024;u="MB"}if(s>=1024){s/=1024;u="GB"}printf "%.2f %s",s,u}'; }
 log() { echo "[$(ts)] $*" | tee -a "$LOG"; }
@@ -191,6 +192,8 @@ wait_tx_code() {
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
+# Before the wipe, and for both modes: RESUME=on skips init.sh and its port check.
+require_free_ports || { log "refusing to start"; exit 2; }
 if [[ "$RESUME" != "on" ]]; then
   rm -rf "$NET"
   "$ROOT/scripts/localnet/init.sh"

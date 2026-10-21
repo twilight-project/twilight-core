@@ -48,6 +48,9 @@ if pgrep -x twilightd >/dev/null 2>&1; then
   echo "a twilightd process is already running; stop it before growing a set" >&2
   exit 2
 fi
+# The port check comes BEFORE the trap: the trap stops every twilightd on the
+# machine, and a refusal must not take down the very node it refused for.
+require_free_ports "$TARGET_N" || { echo "refusing to start" >&2; exit 2; }
 trap '"$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true; pkill -f "twilightd start" >/dev/null 2>&1 || true' EXIT
 
 cometbft_validator_count() {
@@ -90,11 +93,11 @@ prepare_node() {
 
   local id0 rpc p2p grpc
   id0="$("$BIN" tendermint show-node-id --home "$(node_home 0)")"
-  rpc=$((26657 + i * 100)); p2p=$((26656 + i * 100)); grpc=$((9090 + i * 100))
+  rpc=$(rpc_port "$i"); p2p=$(p2p_port "$i"); grpc=$(grpc_port "$i")
   sed -i.bak \
     -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:${rpc}\"#" \
     -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:${p2p}\"#" \
-    -e "s#persistent_peers = \"\"#persistent_peers = \"${id0}@127.0.0.1:26656\"#" \
+    -e "s#persistent_peers = \"\"#persistent_peers = \"${id0}@127.0.0.1:$(p2p_port 0)\"#" \
     -e "s#pex = true#pex = false#" \
     -e "s#allow_duplicate_ip = false#allow_duplicate_ip = true#" \
     -e "s#^timeout_commit = .*#timeout_commit = \"${TWILIGHT_LOCALNET_TIMEOUT_COMMIT:-200ms}\"#" \

@@ -24,6 +24,7 @@ set -euo pipefail
 # would no longer isolate which half had failed.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 BIN="${BIN:-$ROOT/build/twilightd}"
 NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-rewards-localnet}"
 CHAIN_ID="${CHAIN_ID:-twilight-rewards-localnet-1}"
@@ -54,8 +55,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-rpc_url() { echo "tcp://127.0.0.1:$((26657 + $1 * 100))"; }
-http_url() { echo "http://127.0.0.1:$((26657 + $1 * 100))"; }
+rpc_url() { echo "tcp://127.0.0.1:$(rpc_port "$1")"; }
+http_url() { echo "http://127.0.0.1:$(rpc_port "$1")"; }
 latest_height() {
   curl -fsS "$(http_url "$1")/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height | tonumber' 2>/dev/null || echo 0
 }

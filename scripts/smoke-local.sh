@@ -6,17 +6,19 @@
 #
 #   ./scripts/smoke-local.sh        # or: make api-smoke
 #
-# Uses the standard localnet ports (REST 1317, RPC 26657, gRPC 9090) on a dedicated home
+# Uses node 0's localnet ports (RPC, gRPC and REST from scripts/localnet/lib/ports.sh, so
+# LOCALNET_PORT_BASE applies) on a dedicated home
 # ($TWILIGHT_LOCALNET_HOME, default /tmp/twilight-smoke-local). It will conflict with
 # another localnet already bound to those ports — stop that first.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 
 export TWILIGHT_LOCALNET_HOME="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-smoke-local}"
 export CHAIN_ID="${CHAIN_ID:-twilight-smoke-local-1}"
-REST="http://localhost:1317"
+REST="http://localhost:$(rest_port)"
 
 cleanup() { ./scripts/localnet/stop.sh >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -25,6 +27,10 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 echo "== smoke-local: init four-node localnet ($TWILIGHT_LOCALNET_HOME) =="
 ./scripts/localnet/stop.sh >/dev/null 2>&1 || true
+# Check the band here too, before the wipe: init.sh would refuse, but only after this
+# script had already removed the home. REST is outside the band; it is enabled below.
+require_free_ports || die "refusing to start"
+require_ports_free "$(rest_port)" || die "refusing to start"
 rm -rf "$TWILIGHT_LOCALNET_HOME"
 ./scripts/localnet/init.sh >/dev/null || die "localnet init failed"
 
@@ -36,6 +42,8 @@ echo "== enable REST API + Swagger on node0 =="
 A="$TWILIGHT_LOCALNET_HOME/node0/config/app.toml"
 sed -i.bak '/^\[api\]/,/^\[/ s/^enable = false/enable = true/; /^\[api\]/,/^\[/ s/^swagger = false/swagger = true/' "$A" \
   || die "could not edit app.toml"
+sed -i.bak -E "/^\[api\]/,/^\[/ s#^address = \"tcp://([^:\"]+):1317\"#address = \"tcp://\\1:$(rest_port)\"#" "$A" || die "could not edit app.toml"
+grep -q "^address = \"tcp://[^:\"]*:$(rest_port)\"" "$A" || die "app.toml [api] address was not rewritten to port $(rest_port)"
 rm -f "$A.bak"
 
 echo "== start localnet =="
@@ -54,7 +62,7 @@ done
 rc=0
 echo
 echo "######## API SURFACE SMOKE ########"
-RESERVED_CONS_HEX="$RES_HEX" BASE_REST="$REST" BASE_GRPC=localhost:9090 BASE_RPC=http://localhost:26657 \
+RESERVED_CONS_HEX="$RES_HEX" BASE_REST="$REST" BASE_GRPC="localhost:$(grpc_port 0)" BASE_RPC="http://localhost:$(rpc_port 0)" \
   ./scripts/smoke-api-surface.sh || rc=1
 echo
 echo "######## SWAGGER SMOKE ########"
