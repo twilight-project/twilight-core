@@ -48,7 +48,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-rpc_port() { echo $((26657 + $1 * 100)); }
+. "$ROOT/scripts/localnet/lib/ports.sh"
 # The filters are the guards, not the flags. select(test("^[0-9]+\\z")) lets only
 # a string of decimal digits through (CometBFT sends heights as decimal strings;
 # leading zeros are normalised, so "010" reads as 10), and arrays emits nothing
@@ -78,6 +78,9 @@ if pgrep -x twilightd >/dev/null 2>&1; then
 fi
 
 teardown() { "$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true; pkill -f "twilightd start" >/dev/null 2>&1 || true; }
+# The port check comes BEFORE the trap: the trap (teardown) stops every twilightd on the
+# machine, and a refusal must not take down the very node it refused for.
+require_free_ports "$MAX_N" || { echo "refusing to start" >&2; exit 2; }
 trap teardown EXIT
 
 # wait_rpc <observer> — wait for a node's RPC to answer at all.

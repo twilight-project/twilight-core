@@ -591,6 +591,7 @@ git -C "$ROOT" diff --quiet 2>/dev/null || note "working tree has uncommitted ch
 # recorded its checksum, and the provenance evidence would describe bytes that no
 # longer existed.
 echo "  initializing (init.sh builds the node binary; a cold Go cache takes a few minutes)"
+require_free_ports || die "refusing to start"
 "$ROOT/scripts/localnet/init.sh" >/dev/null 2>&1 || die "init failed"
 
 echo

@@ -163,14 +163,13 @@ mining_submit() { # <key> <home> <mining-subcommand...>
 addr_hex() { "$BIN" debug addr "$1" 2>/dev/null | awk '/hex/ { print $3 }'; }
 
 # ---- agreement on the RESTORED network --------------------------------------
-# agree.sh derives its endpoints as 26657 + i*100 and reads logs from the ordinary
-# localnet home. Both are hard-coded, and both are wrong here: the restored chain
-# listens on the 27657 series under its own home, and the ordinary network is
+# agree.sh derives its endpoints from the ordinary band and reads logs from the
+# ordinary localnet home. Both are wrong here: the restored chain listens one
+# thousand ports above that band under its own home, and the ordinary network is
 # stopped by the time this runs. Parameterising agree.sh would change behaviour
 # for its existing callers, so the restored check is local to this drill.
 
-RESTORE_RPC_BASE=27657
-restore_rpc_port() { echo $(( RESTORE_RPC_BASE + $1 * 100 )); }
+RESTORE_RPC_BASE="$(restore_rpc_port 0)"   # restore_*_port come from lib/ports.sh
 # Overridable so the fast suite can drive every branch of the helper below from
 # fixtures. The shipped default is a real HTTP GET against the restored node.
 restore_rpc_get() { curl -fsS "http://127.0.0.1:$(restore_rpc_port "$1")$2" 2>/dev/null; }
@@ -538,6 +537,17 @@ trap cleanup_drill EXIT
 
 echo "=== 1. a four-validator localnet ==="
 SOURCE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+# init.sh checks only the four nodes it creates. The join node and the restored
+# chain bind outside that band, so check them here, before anything is built or
+# wiped: a busy port there is an environment problem and must not surface later
+# as a restore outcome classified DEFECT.
+restore_band=()
+for (( i = 0; i < NODE_COUNT; i++ )); do
+  restore_band+=("$(restore_rpc_port "$i")" "$(restore_p2p_port "$i")" "$(restore_grpc_port "$i")")
+done
+require_ports_free "$(rpc_port "$JOIN_NODE")" "$(p2p_port "$JOIN_NODE")" "$(grpc_port "$JOIN_NODE")" "${restore_band[@]}" \
+  || { echo "  ABORT: refusing to start" >&2; exit 2; }
+require_free_ports || { echo "  ABORT: refusing to start" >&2; exit 2; }
 rm -rf "$RESTORE_NET"
 echo "  initializing (init.sh builds the node binary; a cold Go cache takes a few minutes)"
 "$ROOT/scripts/localnet/init.sh" >/dev/null 2>&1 || { echo "  ABORT: init failed" >&2; exit 2; }
@@ -916,19 +926,19 @@ if [[ -s "$EXPORT_DOC" ]]; then
   rpeers=""
   for (( i = 0; i < NODE_COUNT; i++ )); do
     rid="$("$BIN" tendermint show-node-id --home "$RESTORE_NET/node$i" 2>/dev/null)"
-    rpeers="${rpeers}${rpeers:+,}${rid}@127.0.0.1:$((27656 + i * 100))"
+    rpeers="${rpeers}${rpeers:+,}${rid}@127.0.0.1:$(restore_p2p_port "$i")"
   done
   for (( i = 0; i < NODE_COUNT; i++ )); do
     rhome="$RESTORE_NET/node$i"
     sed -i.bak \
-      -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:$((27657 + i * 100))\"#" \
-      -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:$((27656 + i * 100))\"#" \
+      -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:$(restore_rpc_port "$i")\"#" \
+      -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:$(restore_p2p_port "$i")\"#" \
       -e "s#persistent_peers = \"\"#persistent_peers = \"${rpeers}\"#" \
       -e "s#pex = true#pex = false#" \
       -e "s#allow_duplicate_ip = false#allow_duplicate_ip = true#" \
       -e "s#^timeout_commit = .*#timeout_commit = \"200ms\"#" \
       "$rhome/config/config.toml"
-    sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:$((19090 + i * 100))\"#" "$rhome/config/app.toml"
+    sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:$(restore_grpc_port "$i")\"#" "$rhome/config/app.toml"
     rm -f "$rhome/config/"*.bak
     mkdir -p "$RESTORE_NET/logs"
     "$BIN" start --home "$rhome" --minimum-gas-prices 0utwlt --log_no_color \

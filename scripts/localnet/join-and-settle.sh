@@ -53,6 +53,9 @@ need curl; need jq
 if pgrep -x twilightd >/dev/null 2>&1; then
   echo "a twilightd process is already running; stop it first" >&2; exit 2
 fi
+# The port check comes BEFORE the trap: the trap stops every twilightd on the
+# machine, and a refusal must not take down the very node it refused for.
+require_free_ports 2 || { echo "refusing to start" >&2; exit 2; }
 trap '"$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true; pkill -f "twilightd start" >/dev/null 2>&1 || true' EXIT
 
 mq() { "$BIN" mining-query "$@" --node "$(rpc_url 0)" --output json 2>/dev/null; }
@@ -102,13 +105,13 @@ echo "=== 2. a second Slot joins ==="
 cp "$(node_home 0)/config/genesis.json" "$(node_home 1)/config/genesis.json"
 id0="$("$BIN" tendermint show-node-id --home "$(node_home 0)")"
 sed -i.bak \
-  -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:26757\"#" \
-  -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:26756\"#" \
-  -e "s#persistent_peers = \"\"#persistent_peers = \"${id0}@127.0.0.1:26656\"#" \
+  -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:$(rpc_port 1)\"#" \
+  -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:$(p2p_port 1)\"#" \
+  -e "s#persistent_peers = \"\"#persistent_peers = \"${id0}@127.0.0.1:$(p2p_port 0)\"#" \
   -e "s#pex = true#pex = false#" -e "s#allow_duplicate_ip = false#allow_duplicate_ip = true#" \
   -e "s#^timeout_commit = .*#timeout_commit = \"${TWILIGHT_LOCALNET_TIMEOUT_COMMIT}\"#" \
   "$(node_home 1)/config/config.toml"
-sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:9190\"#" "$(node_home 1)/config/app.toml"
+sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:$(grpc_port 1)\"#" "$(node_home 1)/config/app.toml"
 rm -f "$(node_home 1)/config/"*.bak
 start_node 1
 wait_rpc 1 || fail "node1 RPC never answered"

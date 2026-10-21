@@ -273,19 +273,21 @@ check "lost + fresh counters is a defect"   "DEFECT" \
 
 # ---------------------------------------------------------------------------
 group ports "the restored agreement check queries the RESTORED network"
-# The defect this closes: agree.sh derives endpoints as 26657 + i*100 from the
-# ordinary localnet home, so calling it here checked a network that is stopped by
+# The defect this closes: agree.sh derives endpoints from the ordinary port band
+# and the ordinary localnet home, so calling it here checked a network that is stopped by
 # the time the restore runs. A healthy restored continuation could never have
 # satisfied it.
-check "node 0 uses the restore base"   "27657" "$(restore_rpc_port 0)"
-check "node 1"                         "27757" "$(restore_rpc_port 1)"
-check "node 2"                         "27857" "$(restore_rpc_port 2)"
-check "node 3"                         "27957" "$(restore_rpc_port 3)"
+check "node 0 uses the restore base"   "$((27657 + LOCALNET_PORT_BASE))" "$(restore_rpc_port 0)"
+check "node 1"                         "$((27757 + LOCALNET_PORT_BASE))" "$(restore_rpc_port 1)"
+check "node 2"                         "$((27857 + LOCALNET_PORT_BASE))" "$(restore_rpc_port 2)"
+check "node 3"                         "$((27957 + LOCALNET_PORT_BASE))" "$(restore_rpc_port 3)"
+check "restored p2p sits beside its rpc" "$((27656 + LOCALNET_PORT_BASE))" "$(restore_p2p_port 0)"
+check "restored grpc is ten thousand up"  "$((19090 + LOCALNET_PORT_BASE))" "$(restore_grpc_port 0)"
 check "the base is not the ordinary one" "differs" \
-  "$([[ "$RESTORE_RPC_BASE" == "26657" ]] && echo same || echo differs)"
+  "$([[ "$RESTORE_RPC_BASE" == "$(rpc_port 0)" ]] && echo same || echo differs)"
 check "no restored port collides with the localnet series" "none" \
   "$(for i in 0 1 2 3; do for j in 0 1 2 3 4; do
-       [[ "$(restore_rpc_port $i)" == "$((26657 + j * 100))" ]] && echo collision; done; done | head -1 | grep -c collision | sed 's/^0$/none/')"
+       [[ "$(restore_rpc_port $i)" == "$(rpc_port $j)" ]] && echo collision; done; done | head -1 | grep -c collision | sed 's/^0$/none/')"
 # With nothing listening on the restore ports the helper must report the reason
 # rather than silently reading agreement from somewhere else. It ASSIGNS rather
 # than prints, so a caller using $( ) would lose everything it recorded.
@@ -398,7 +400,7 @@ EXPECTED_ECON=62
 EXPECTED_CLASSIFY=28
 EXPECTED_CAPTURE=28
 EXPECTED_PARTICIPATION=7
-EXPECTED_PORTS=8
+EXPECTED_PORTS=10
 EXPECTED_AGREEMENT=13
 EXPECTED_VERDICTS=13
 EXPECTED_ENDTOEND=4

@@ -96,6 +96,13 @@ check "an absent file refuses"               "nonzero" "$([[ $? -ne 0 ]] && echo
 
 group "the port guard fails closed"
 
+# The guard has two inspectors; the stubs below stand in for lsof, and the
+# loopback probe is silenced so that a node on this host's band cannot change
+# the answer. The one check that needs a real socket starts its own listener.
+# An inherited skip flag would hollow out every check, so it is cleared first.
+unset LOCALNET_SKIP_PORT_CHECK
+port_answers_on_loopback() { return 1; }
+
 # lsof returning non-zero is how a FREE port looks, so a missing lsof returns
 # non-zero for every port — and a guard that only checked exit status would
 # report a clean bill of health on the machine where it could not look.
@@ -105,12 +112,80 @@ check "no inspector available refuses"       "nonzero" "$([[ $? -ne 0 ]] && echo
 
 mkdir -p "$WORK/bin"
 printf '#!/usr/bin/env bash\nexit 1\n' >"$WORK/bin/lsof"; chmod +x "$WORK/bin/lsof"
-( PATH="$WORK/bin:$PATH"; NODE_COUNT=4 require_free_ports >/dev/null 2>&1 )
+( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 NODE_COUNT=4 require_free_ports >/dev/null 2>&1 )
 check "genuinely free ports pass"            "0" "$?"
 
 printf '#!/usr/bin/env bash\nexit 0\n' >"$WORK/bin/lsof"; chmod +x "$WORK/bin/lsof"
-( PATH="$WORK/bin:$PATH"; NODE_COUNT=4 require_free_ports >/dev/null 2>&1 )
+( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 NODE_COUNT=4 require_free_ports >/dev/null 2>&1 )
 check "an occupied port refuses"             "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+
+# ---- the port scheme -------------------------------------------------------------
+
+group "the port scheme moves with LOCALNET_PORT_BASE and refuses bad bases"
+
+PORTS_LIB="$ROOT/scripts/localnet/lib/ports.sh"
+# <base> <expression...> — evaluate port functions in a fresh shell under a base.
+ports_under() { local base="$1"; shift; LOCALNET_PORT_BASE="$base" bash -c '. "$1" && eval "$2"' _ "$PORTS_LIB" "$*" 2>/dev/null; }
+# <base> — the exit status of sourcing the library under a base.
+source_under() { LOCALNET_PORT_BASE="$1" bash -c '. "$1"' _ "$PORTS_LIB" >/dev/null 2>&1; echo $?; }
+
+check "default band is the historical one"   "26657 26656 9090 1317" "$(ports_under 0 'echo "$(rpc_port 0) $(p2p_port 0) $(grpc_port 0) $(rest_port)"')"
+check "every family moves by the base"       "29957 29956 12390 4317" "$(ports_under 3000 'echo "$(rpc_port 3) $(p2p_port 3) $(grpc_port 3) $(rest_port)"')"
+check "the restore band moves with it"       "30657 30656 22090" "$(ports_under 3000 'echo "$(restore_rpc_port 0) $(restore_p2p_port 0) $(restore_grpc_port 0)"')"
+check "a leading zero is refused (octal)"    "2" "$(source_under 010)"
+check "a non-integer base is refused"        "2" "$(source_under abc)"
+check "an explicitly empty base is refused"  "2" "$(source_under '')"
+check "the largest usable base is accepted"  "0" "$(source_under 37578)"
+check "one past it is refused"               "2" "$(source_under 37579)"
+check "a bad grace value is refused"         "2" "$(LOCALNET_PORT_GRACE_SECONDS=5s bash -c '. "$1"' _ "$PORTS_LIB" >/dev/null 2>&1; echo $?)"
+check "an overflowing base is refused"       "2" "$(source_under 18446744073709551616)"
+( LOCALNET_PORT_GRACE_SECONDS=0 NODE_COUNT=abc require_free_ports >/dev/null 2>&1 )
+check "a non-numeric node count refuses"     "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+( LOCALNET_PORT_GRACE_SECONDS=0 require_ports_free >/dev/null 2>&1 )
+check "an empty port list refuses"           "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+( LOCALNET_PORT_GRACE_SECONDS=0 require_ports_free "08" >/dev/null 2>&1 )
+check "a malformed port refuses"             "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+( LOCALNET_SKIP_PORT_CHECK=1 require_ports_free 70000 >/dev/null 2>&1 )
+check "the skip flag does not skip the range check" "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+SKIPPED="$( PATH="$WORK/empty-path"; LOCALNET_SKIP_PORT_CHECK=1 require_ports_free 26657 2>&1 >/dev/null; echo "rc=$?" )"
+check "the skip flag bypasses the inspectors, loudly" "LOCALNET_SKIP_PORT_CHECK=1: not checking whether ports 26657 are free rc=0" "$(echo "$SKIPPED" | tr '\n' ' ' | sed 's/ $//')"
+
+# The stub reports node 3's RPC port busy and nothing else, so the count
+# argument decides the answer: three nodes pass, four refuse. The port is
+# derived, not written down, so the suite holds under any LOCALNET_PORT_BASE.
+NODE3_RPC="$(rpc_port 3)"
+printf '#!/usr/bin/env bash\n[[ "$*" == *:%s* ]] && exit 0\nexit 1\n' "$NODE3_RPC" >"$WORK/bin/lsof"; chmod +x "$WORK/bin/lsof"
+( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 require_free_ports 3 >/dev/null 2>&1 )
+check "the count argument bounds the check"  "0" "$?"
+( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 require_free_ports 4 >/dev/null 2>&1 )
+check "a busy port inside the count refuses" "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+REFUSAL="$( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 require_free_ports 4 2>&1 >/dev/null )"
+check "the refusal names the port"           "named" "$([[ "$REFUSAL" == *"$NODE3_RPC"* ]] && echo named || echo "not named: $REFUSAL")"
+( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 require_ports_free 70000 >/dev/null 2>&1 )
+check "a port past 65535 refuses"            "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+
+# A listener lsof cannot see (another user's, say) must still count as busy: the
+# loopback connect probe sees it. This is the one check that opens a real
+# socket, on a port the kernel picks, with the real probe restored.
+unset -f port_answers_on_loopback
+. "$PORTS_LIB"
+if command -v python3 >/dev/null 2>&1; then
+  PROBE_PORT_FILE="$WORK/probe-port"; rm -f "$PROBE_PORT_FILE"
+  python3 -c "import socket,time,sys; s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(16); open(sys.argv[1],'w').write(str(s.getsockname()[1])); time.sleep(20)" "$PROBE_PORT_FILE" >/dev/null 2>&1 &
+  PROBE_PID=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [[ -s "$PROBE_PORT_FILE" ]] && break; sleep 0.1; done
+  PROBE_PORT="$(cat "$PROBE_PORT_FILE" 2>/dev/null || true)"
+  if [[ "$PROBE_PORT" =~ ^[0-9]+$ ]]; then
+    printf '#!/usr/bin/env bash\nexit 1\n' >"$WORK/bin/lsof"; chmod +x "$WORK/bin/lsof"
+    ( PATH="$WORK/bin:$PATH"; LOCALNET_PORT_GRACE_SECONDS=0 require_ports_free "$PROBE_PORT" >/dev/null 2>&1 )
+    check "a listener invisible to lsof still refuses" "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+  else
+    echo "  skip  a listener invisible to lsof still refuses       (no listener could be started)"
+  fi
+  kill "$PROBE_PID" >/dev/null 2>&1; wait "$PROBE_PID" 2>/dev/null || true
+else
+  echo "  skip  a listener invisible to lsof still refuses       (python3 not available)"
+fi
 
 # ---- running-binary identity -----------------------------------------------------
 

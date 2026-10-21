@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 MIN_HEIGHT="${MIN_HEIGHT:-3}"
 
 "$ROOT/scripts/localnet/init.sh"
@@ -14,7 +15,7 @@ ready=0
 while ((SECONDS < deadline)); do
   ok=1
   for i in 0 1 2 3; do
-    port=$((26657 + i * 100))
+    port=$(rpc_port "$i")
     # Tolerate not-yet-listening nodes during startup (curl exit 7) without
     # aborting under `set -e`.
     status="$(curl -sf "http://127.0.0.1:${port}/status" 2>/dev/null || true)"
