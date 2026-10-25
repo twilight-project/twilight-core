@@ -1,4 +1,6 @@
-# Twilight Core
+<p align="center">
+  <a href="https://twilight.org"><img src=".github/banner.svg" alt="Twilight Core" width="100%"></a>
+</p>
 
 [![CI](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml/badge.svg)](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/twilight-project/twilight-core?include_prereleases&sort=semver)](https://github.com/twilight-project/twilight-core/releases)
