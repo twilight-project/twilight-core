@@ -65,7 +65,7 @@ func BasicManager() module.BasicManager {
 		consensus.AppModuleBasic{},
 		coreslot.NewAppModuleBasic(app.AuthorityAddress(), app.EmergencyAuthorityAddress()),
 		// rewards basic module: codec/genesis/interface registration for `init`.
-		// Tx/query CLI commands are deferred to Phase 9.
+		// Its tx tree is mounted by AutoCLI (GetTxCmd) and at the root below.
 		rewards.NewAppModuleBasic(),
 		mining.NewAppModuleBasic(),
 		// x/upgrade mounts a store, so `twilightd init` must write its genesis

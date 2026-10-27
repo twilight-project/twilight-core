@@ -16,8 +16,30 @@ import (
 
 // GetTxCmd returns the rewards transaction command tree. It wraps only the
 // existing Msgs; it adds no new messages and infers no authority.
+//
+// It is mounted twice: at the root as `twilightd rewards ...` for compatibility,
+// and by AutoCLI at `tx rewards` as the canonical surface (#144), in place of the
+// generated tree that spelled the same three operations `pause-rewards`,
+// `resume-rewards` and `update-rewards-params`.
+//
+// RunE is client.ValidateCmd for the reason x/coreslot gives: cobra reports an
+// unknown subcommand only for the ROOT command, and a non-root parent that is not
+// itself runnable prints help and EXITS ZERO. The generated names used to fail
+// loudly when misspelled; a script still carrying `tx rewards pause-rewards` must
+// keep failing loudly rather than print help and report success.
+//
+// Unlike the SDK's module-command template, the parent PARSES its flags. With
+// DisableFlagParsing a flag placed before the subcommand swallows the
+// subcommand as its value — `tx rewards --yes pause --from k` printed help and
+// exited zero with nothing broadcast — and pause is the emergency lever, so that
+// path has to fail. With parsing on, an unknown flag on the parent is an error.
 func GetTxCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "rewards", Short: "Rewards module transactions", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
+	cmd := &cobra.Command{
+		Use:                        "rewards",
+		Short:                      "Rewards module transactions",
+		SuggestionsMinimumDistance: 2,
+		RunE:                       client.ValidateCmd,
+	}
 	cmd.AddCommand(updateParamsCmd(), pauseCmd(), resumeCmd())
 	return cmd
 }
@@ -38,8 +60,12 @@ func signer(cmd *cobra.Command) (string, error) {
 	return ctx.GetFromAddress().String(), nil
 }
 
-func txCmd(use string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {
-	cmd := &cobra.Command{Use: use, Args: args, RunE: run}
+// txCmd builds one leaf. suggestFor carries the retired AutoCLI spelling of the
+// same operation, so a script or operator still using it is told the new name
+// ("Did you mean this?") rather than left with a bare unknown-command error. It
+// is a hint, not an alias: the old spelling still fails.
+func txCmd(use, short, suggestFor string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {
+	cmd := &cobra.Command{Use: use, Short: short, SuggestFor: []string{suggestFor}, Args: args, RunE: run}
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
 }
@@ -48,17 +74,19 @@ func txCmd(use string, args cobra.PositionalArgs, run func(*cobra.Command, []str
 // changes to the immutable native denom / max supply; the CLI simply forwards the
 // signed Params and does not infer authority.
 func updateParamsCmd() *cobra.Command {
-	return txCmd("update-params [params-json-file]", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
-		ctx, err := client.GetClientTxContext(cmd)
-		if err != nil {
-			return err
-		}
-		msg, err := buildUpdateParamsMsg(ctx.Codec, ctx.GetFromAddress().String(), args[0])
-		if err != nil {
-			return err
-		}
-		return clienttx.GenerateOrBroadcastTxCLI(ctx, cmd.Flags(), msg)
-	})
+	return txCmd("update-params [params-json-file]",
+		"Queue a rewards parameter update from a JSON file (CoreSlot authority); it activates at the next epoch boundary",
+		"update-rewards-params", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
+			ctx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			msg, err := buildUpdateParamsMsg(ctx.Codec, ctx.GetFromAddress().String(), args[0])
+			if err != nil {
+				return err
+			}
+			return clienttx.GenerateOrBroadcastTxCLI(ctx, cmd.Flags(), msg)
+		})
 }
 
 // pauseCmd schedules a GLOBAL rewards pause for the next block.
@@ -67,32 +95,36 @@ func updateParamsCmd() *cobra.Command {
 // state, and offering --emissions/--settlement/--claims would advertise a partial
 // pause the protocol no longer has.
 func pauseCmd() *cobra.Command {
-	return txCmd("pause", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
-		from, err := signer(cmd)
-		if err != nil {
-			return err
-		}
-		msg, err := buildPauseMsg(from)
-		if err != nil {
-			return err
-		}
-		return broadcast(cmd, msg)
-	})
+	return txCmd("pause",
+		"Pause rewards globally from the next block (CoreSlot emergency authority)",
+		"pause-rewards", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+			from, err := signer(cmd)
+			if err != nil {
+				return err
+			}
+			msg, err := buildPauseMsg(from)
+			if err != nil {
+				return err
+			}
+			return broadcast(cmd, msg)
+		})
 }
 
 // resumeCmd schedules a global rewards resume for the next block.
 func resumeCmd() *cobra.Command {
-	return txCmd("resume", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
-		from, err := signer(cmd)
-		if err != nil {
-			return err
-		}
-		msg, err := buildResumeMsg(from)
-		if err != nil {
-			return err
-		}
-		return broadcast(cmd, msg)
-	})
+	return txCmd("resume",
+		"Resume rewards from the next block after a pause (CoreSlot emergency authority)",
+		"resume-rewards", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+			from, err := signer(cmd)
+			if err != nil {
+				return err
+			}
+			msg, err := buildResumeMsg(from)
+			if err != nil {
+				return err
+			}
+			return broadcast(cmd, msg)
+		})
 }
 
 // --- Pure message builders (testable without a client context/network) ---

@@ -60,6 +60,22 @@ func TestGetTxCmdRegistersAllTxs(t *testing.T) {
 		require.NotNil(t, subcommand(t, cmd, name))
 	}
 
+	// Exactly the three, and none of the spellings the generated tree used. This
+	// tree is now what AutoCLI mounts at `tx rewards` (#144), so a duplicate here
+	// would be a duplicate on the canonical surface.
+	require.Len(t, cmd.Commands(), 3, "the rewards tree holds exactly the three canonical commands")
+	for _, generated := range []string{"pause-rewards", "resume-rewards", "update-rewards-params"} {
+		requireNoSubcommand(t, cmd, generated)
+	}
+
+	// A non-root parent without a RunE prints help and exits zero on an unknown
+	// subcommand. This one must refuse, so that a script still carrying a
+	// generated spelling fails instead of reporting success.
+	require.NotNil(t, cmd.RunE, "the parent must validate its arguments rather than fall through to help")
+	err := cmd.RunE(cmd, []string{"pause-rewards"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown command")
+
 	// Pause/resume are GLOBAL and take no area selectors: offering them would
 	// advertise a partial pause the protocol no longer has.
 	for _, name := range []string{"pause", "resume"} {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks the CoreSlot transaction surface against a REAL BINARY.
+# Checks the CoreSlot and rewards transaction surfaces against a REAL BINARY.
 #
 # The Go test in cmd/twilightd/cmd asserts the assembled cobra tree, which is
 # necessary but not sufficient: it proves a command exists, not that an operator
@@ -117,6 +117,36 @@ echo "=== a bad key is refused, not silently accepted ==="
 bad_rc=$?
 check "wrong @type is rejected"             "rejected" \
   "$([[ $bad_rc -ne 0 ]] && echo rejected || echo ACCEPTED)"
+
+echo
+echo "=== the rewards surface: one hand-written tree, mounted at tx rewards and at the root ==="
+# #144: AutoCLI generated a second `tx rewards` tree that spelled the same three
+# operations `pause-rewards`, `resume-rewards` and `update-rewards-params`. The
+# hand-written tree is now mounted there instead, so the generated spellings must
+# fail loudly (see the CoreSlot block above for why a silent exit 0 is the hazard),
+# the canonical names must build a transaction, and the root-level tree must stay.
+# HOME is pointed at the work dir: a runnable parent runs the root pre-run hook,
+# which writes default config files into the home, and the runner's own must
+# stay untouched.
+for generated in pause-rewards resume-rewards update-rewards-params; do
+  out="$(HOME="$WORK" "$BIN" tx rewards "$generated" 2>&1)"; rc=$?
+  check "tx rewards $generated fails"         "rejected" \
+    "$([[ $rc -ne 0 ]] && echo rejected || echo ACCEPTED)"
+  check "  ...naming it as unknown"           "yes" \
+    "$(grep -qi 'unknown command' <<<"$out" && echo yes || echo no)"
+done
+msg_type() { jq -r '.body.messages[0]."@type" // "MISSING"' <<<"$1" 2>/dev/null | sed 's|.*\.||' | grep . || echo MISSING; }
+TX_PAUSE="$("$BIN" tx rewards pause --from probe --keyring-backend test --home "$HOME_DIR" \
+  --chain-id surface-check --generate-only 2>/dev/null)"
+check "tx rewards pause produces a transaction" "MsgPauseRewards" "$(msg_type "$TX_PAUSE")"
+TX_RESUME="$("$BIN" tx rewards resume --from probe --keyring-backend test --home "$HOME_DIR" \
+  --chain-id surface-check --generate-only 2>/dev/null)"
+check "tx rewards resume produces a transaction" "MsgResumeRewards" "$(msg_type "$TX_RESUME")"
+ROOT_PAUSE="$("$BIN" rewards pause --from probe --keyring-backend test --home "$HOME_DIR" \
+  --chain-id surface-check --generate-only 2>/dev/null)"
+check "root-level rewards pause still works"   "MsgPauseRewards" "$(msg_type "$ROOT_PAUSE")"
+check "tx rewards lists exactly the three"      "pause resume update-params" \
+  "$(HOME="$WORK" "$BIN" tx rewards --help 2>/dev/null | awk '/^Available Commands:/{f=1; next} f && /^$/{exit} f{print $1}' | sort | tr '\n' ' ' | sed 's/ $//')"
 
 echo
 if (( FAILED > 0 )); then

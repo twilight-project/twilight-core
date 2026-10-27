@@ -109,7 +109,7 @@ Fast, and no network is started. The first six run in CI's *build & test* job.
 
 | Target | Proves |
 |---|---|
-| `make check-cli-surface` | the CoreSlot transaction commands against a real binary, including that retired names fail loudly |
+| `make check-cli-surface` | the CoreSlot and rewards transaction commands against a real binary, including that retired names fail loudly |
 | `make check-vulncheck-pin` | the vulnerability scan runs under the Go version `go.mod` declares |
 | `make release-upgrade-faults` | the release rehearsal's readers fail on bad input instead of reporting success |
 | `make block-gas-faults` | the same for the block-gas tooling |

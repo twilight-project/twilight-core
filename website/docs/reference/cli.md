@@ -4,19 +4,19 @@ title: CLI Reference
 
 # CLI Reference
 
-Most custom-module commands are reachable two ways: under a **top-level group** with
-short, stable names, which this site uses throughout, and under the SDK's
-`query <module>` / `tx <module>` tree. The `query` trees are generated and follow the RPC
-names; `tx coreslot` is the same hand-written tree mounted a second time, so its names
-match; `tx mining` and `coreslot-genesis` exist in one place only. Both forms reach the
-same handlers.
+Most custom-module commands are reachable two ways: under the SDK's
+`query <module>` / `tx <module>` tree, and under a **top-level group** with the same short,
+stable names, which the operator pages use. The `query` trees are generated and follow the
+RPC names; `tx coreslot` and `tx rewards` are the hand-written trees, mounted a second time
+at the top level for compatibility, so their names match; `tx mining` and
+`coreslot-genesis` exist in one place only. Both forms reach the same handlers.
 
-| Top-level group | Generated equivalent | Contents |
+| Top-level group | SDK-tree equivalent | Contents |
 |---|---|---|
 | `coreslot-query` | `query coreslot` | 14 read-only CoreSlot queries |
 | `coreslot` | `tx coreslot` (same names) | 16 CoreSlot transactions |
 | `rewards-query` | `query rewards` | 15 read-only rewards queries |
-| `rewards` | `tx rewards` (`pause-rewards`, `resume-rewards`, `update-rewards-params`) | 3 rewards transactions |
+| `rewards` | `tx rewards` (same names) | 3 rewards transactions |
 | `mining-query` | `query mining` (same names) | 12 read-only settlement queries |
 | — | `tx mining` | 2 settlement transactions; there is no top-level group for them |
 
