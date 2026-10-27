@@ -753,16 +753,31 @@ func (q queryServer) RewardConfigVersions(
 				if err := q.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
 					return nil, err
 				}
-			} else if previous.Version+1 != version.Version || previous.EffectiveEpoch >= version.EffectiveEpoch {
+			} else {
 				// Contiguity, not merely increase. A page that presented 1 then 3 as
 				// canonical history would be publishing a sequence in which version 2
 				// is simultaneously in range and absent — which is the state the
 				// version lookup classifies as corruption, so the enumeration must not
 				// serve it as ordinary data.
-				return nil, types.ErrInvalidState.Wrapf(
-					"reward configuration version %d at effective epoch %d does not immediately follow version %d at effective epoch %d; "+
-						"canonical versions are contiguous",
-					version.Version, version.EffectiveEpoch, previous.Version, previous.EffectiveEpoch)
+				//
+				// Checked arithmetic, as at the write boundary and at the leading edge
+				// of the page: a predecessor at the top of the version space has no
+				// successor, and letting the sum wrap would compare the next row
+				// against 0. The ratified relation is next = previous + 1 under checked
+				// addition, so a predecessor without a representable successor is
+				// corruption in its own right, not a row that merely fails to follow.
+				successor, err := checked.AddUint64(previous.Version, 1)
+				if err != nil {
+					return nil, types.ErrInvalidState.Wrapf(
+						"reward configuration version %d at effective epoch %d has no representable successor",
+						previous.Version, previous.EffectiveEpoch)
+				}
+				if version.Version != successor || previous.EffectiveEpoch >= version.EffectiveEpoch {
+					return nil, types.ErrInvalidState.Wrapf(
+						"reward configuration version %d at effective epoch %d does not immediately follow version %d at effective epoch %d; "+
+							"canonical versions are contiguous",
+						version.Version, version.EffectiveEpoch, previous.Version, previous.EffectiveEpoch)
+				}
 			}
 			value := version
 			previous = &value
