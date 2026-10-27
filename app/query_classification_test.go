@@ -109,6 +109,12 @@ func malformedCases() []classificationCase {
 			&rewardstypes.QueryCurrentEpochActiveBlocksRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
 		{"rewards epoch config versions paged by offset and key at once", "/twilight.rewards.v1.Query/EpochConfigVersions",
 			&rewardstypes.QueryEpochConfigVersionsRequest{Pagination: &query.PageRequest{Offset: 1, Key: []byte{1}}}, codes.InvalidArgument},
+		// The epoch-config history is a bounded listing (#85): counting it, or any
+		// offset at all, is refused as the caller's mistake rather than attempted.
+		{"rewards epoch config versions asked for a total", "/twilight.rewards.v1.Query/EpochConfigVersions",
+			&rewardstypes.QueryEpochConfigVersionsRequest{Pagination: &query.PageRequest{CountTotal: true}}, codes.InvalidArgument},
+		{"rewards epoch config versions paged by offset", "/twilight.rewards.v1.Query/EpochConfigVersions",
+			&rewardstypes.QueryEpochConfigVersionsRequest{Pagination: &query.PageRequest{Offset: 200}}, codes.InvalidArgument},
 	}
 }
 
