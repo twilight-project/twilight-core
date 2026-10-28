@@ -352,8 +352,12 @@ func (m msgServer) RemoveCoreSlot(ctx context.Context, msg *types.MsgRemoveCoreS
 	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
 		return nil, err
 	}
-	_ = m.ByOperator.Remove(ctx, slot.OperatorAddress)
-	_ = m.ByConsensus.Remove(ctx, key)
+	if err := m.ByOperator.Remove(ctx, slot.OperatorAddress); err != nil {
+		return nil, err
+	}
+	if err := m.ByConsensus.Remove(ctx, key); err != nil {
+		return nil, err
+	}
 	if err := m.Reserved.Set(ctx, key, types.ReservedConsensusAddress{
 		ConsAddress: addr, SlotId: slot.SlotId, ReservedUntil: height + int64(params.ConsensusKeyReuseLockout), Reason: msg.Reason,
 	}); err != nil {
@@ -409,7 +413,9 @@ func (m msgServer) RotateConsensusKey(ctx context.Context, msg *types.MsgRotateC
 		emitKeyRotationRequested(ctx, slot.SlotId, slot.OperatorAddress, oldKey, newKey, effectiveHeight)
 		return &types.MsgRotateConsensusKeyResponse{}, nil
 	}
-	_ = m.ByConsensus.Remove(ctx, oldKey)
+	if err := m.ByConsensus.Remove(ctx, oldKey); err != nil {
+		return nil, err
+	}
 	slot.ConsensusPubkey, slot.UpdatedHeight = msg.NewConsensusPubkey, height
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 		return nil, err

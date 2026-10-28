@@ -94,7 +94,9 @@ func (k Keeper) endBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {
 		if err := k.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 			return nil, err
 		}
-		_ = k.ByConsensus.Remove(ctx, oldKey)
+		if err := k.ByConsensus.Remove(ctx, oldKey); err != nil {
+			return nil, err
+		}
 		if err := k.Reserved.Set(ctx, oldKey, types.ReservedConsensusAddress{
 			ConsAddress: oldAddr, SlotId: slot.SlotId, ReservedUntil: height + int64(params.ConsensusKeyReuseLockout), Reason: "key rotation",
 		}); err != nil {
