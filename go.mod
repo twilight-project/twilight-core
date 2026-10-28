@@ -2,7 +2,7 @@ module github.com/twilight-project/twilight-core
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	cosmossdk.io/api v0.9.2
