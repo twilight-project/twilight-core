@@ -43,7 +43,8 @@ Registration creates the slot `PENDING` with power 0, its reward-weight row and 
 initial selection policy; activation makes it `ACTIVE` at `slot_voting_power` and emits
 the validator update in that block's EndBlock. Your running node starts validating
 without a restart; `/status` then shows a non-zero `validator_info.voting_power`.
-Activation is refused if it would exceed `max_active_slots`.
+Activation is refused if it would exceed `max_active_slots`. Lowering that cap never removes
+an active slot; see [Changing the slot bounds](../rewards/params.md#changing-the-slot-bounds).
 
 ## The slot lifecycle
 
