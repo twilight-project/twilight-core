@@ -33,6 +33,14 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `RewardConfigVersions` | `/twilight/rewards/v1/reward-config-versions` | `pagination.*` (query) | `QueryRewardConfigVersionsResponse` | `curl $REST/twilight/rewards/v1/reward-config-versions` | 200 |
 | `RewardConfigVersion` | `/twilight/rewards/v1/reward-config-version` | `version` **or** `effective_epoch` (query, uint64) | `QueryRewardConfigVersionResponse` | `curl "$REST/twilight/rewards/v1/reward-config-version?version=1"` | 200; 404 if no such version |
 
+Pagination on the x/rewards listings: `SlotEntitlementsByEpoch`, `EpochConfigVersions`
+(its history half) and `RewardConfigVersions` accept `pagination.limit` (capped at 100) and
+`pagination.key`, and refuse `pagination.offset`, `pagination.count_total` and
+`pagination.reverse` with `InvalidArgument` (HTTP 400): each of those would let one request
+cost work proportional to the whole collection. Follow `next_key` until it is empty for a
+complete traversal; `pagination.total` is never set. `CurrentEpochActiveBlocks` is bounded
+by the active-slot maximum and accepts the full `pagination.*` set.
+
 ## x/coreslot — `twilight.coreslot.v1.Query`
 
 | gRPC method | REST path | Request params | Response type | Example curl | Expected |

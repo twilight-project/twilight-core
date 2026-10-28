@@ -418,6 +418,13 @@ func pageRequestError(page *query.PageRequest) error {
 // force the node to materialize an entire collection, and the schedule is the
 // more exposed of the two because its size is not bounded by chain age.
 //
+// The history page goes through boundedPage, like the entitlement and
+// reward-configuration listings: offset, count_total and reverse are refused,
+// the limit is capped, and the key cursor is the way to page. The schedule window is bounded
+// by scheduledEpochConfigPage. Before this the history half took the caller's
+// PageRequest as given, so a nil page counted the whole history and an offset
+// walked it row by row (#85).
+//
 // Rows are validated on the way out. A malformed row is not history — presenting
 // it as though it were would let a client build a boundary derivation on a record
 // consensus itself would refuse, so the query fails closed exactly as the block
@@ -433,11 +440,13 @@ func (q queryServer) EpochConfigVersions(
 		startEpoch = req.ScheduledStartEpoch
 		limit = req.ScheduledLimit
 	}
-	if err := pageRequestError(historyPage); err != nil {
+	// Bounded before anything is read.
+	page, err := boundedPage(historyPage)
+	if err != nil {
 		return nil, err
 	}
 	versions, pageRes, err := query.CollectionPaginate(
-		ctx, q.Keeper.EpochConfigVersions, historyPage,
+		ctx, q.Keeper.EpochConfigVersions, page,
 		func(key uint64, version types.EpochConfigVersion) (*types.EpochConfigVersion, error) {
 			if err := validateEpochConfigRecord(key, version); err != nil {
 				return nil, err
