@@ -85,7 +85,7 @@ tools/            auxiliary tooling (the read-only dashboard)
 
 ## Prerequisites
 
-- **Go 1.26.0 or newer**, **make**, and **git** — to build and test. The build itself uses Go 1.26.9, the
+- **Go 1.26.0 or newer**, **make**, and **git** — to build and test. The build itself uses Go 1.26.10, the
   `toolchain` line in `go.mod`, which the `go` command downloads automatically.
 - **jq**, **curl**, and **lsof** — used by the localnet scripts and drills.
 - **protoc** — only if you regenerate protobuf (`make proto`).
