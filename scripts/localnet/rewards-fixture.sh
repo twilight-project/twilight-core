@@ -8,7 +8,7 @@ set -euo pipefail
 # endpoints have REAL data (today they return 200 []). Differences from the smoke:
 #   1. REST (1317) is ENABLED on node0 (the indexer needs it for sampled supply/balances;
 #      the smoke only exposed RPC + gRPC).
-#   2. NO teardown — the chain is LEFT RUNNING (RPC 26657 + REST 1317) so the indexer can
+#   2. NO teardown — the chain is LEFT RUNNING (node 0's RPC + REST ports) so the indexer can
 #      ingest. Stop it later with: TWILIGHT_LOCALNET_HOME=<NET> scripts/localnet/stop.sh
 #   3. Drives several finalized epochs so the rewards pages have multiple rows.
 #
@@ -20,6 +20,7 @@ set -euo pipefail
 # x/mining, which has no CLI yet. Extend this fixture there when it does.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 BIN="${BIN:-$ROOT/build/twilightd}"
 # FORCE the fixture's own home + chain-id. Do NOT read TWILIGHT_LOCALNET_HOME / CHAIN_ID here — if the
 # caller already exported those (e.g. a sourced localnet dev env, like a `localnet >` prompt), inheriting
@@ -44,18 +45,21 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-# Preflight: RPC 26657 must be FREE (the fixture and any running localnet share ports). Refuse to
-# clobber a running chain — stop it first.
-if curl -fsS --max-time 2 http://127.0.0.1:26657/status >/dev/null 2>&1; then
-  echo "ERROR: a node is already serving RPC 26657. Stop every running localnet first, then re-run:" >&2
+# Preflight: node 0's RPC port must be FREE (the fixture and any running localnet share ports).
+# Refuse to clobber a running chain — stop it first, or move this fixture with LOCALNET_PORT_BASE.
+if curl -fsS --max-time 2 "http://127.0.0.1:$(rpc_port 0)/status" >/dev/null 2>&1; then
+  echo "ERROR: a node is already serving RPC $(rpc_port 0). Stop every running localnet first, then re-run:" >&2
   echo "  TWILIGHT_LOCALNET_HOME=/tmp/twilight-localnet         $ROOT/scripts/localnet/stop.sh" >&2
   echo "  TWILIGHT_LOCALNET_HOME=$NET $ROOT/scripts/localnet/stop.sh" >&2
   echo "  pkill -f 'twilightd start'   # last resort for orphaned nodes" >&2
   exit 1
 fi
 
-rpc_url() { echo "tcp://127.0.0.1:$((26657 + $1 * 100))"; }
-http_url() { echo "http://127.0.0.1:$((26657 + $1 * 100))"; }
+# REST is outside the band init.sh checks; it is enabled below, so check it here.
+require_ports_free "$(rest_port)" || exit 1
+
+rpc_url() { echo "tcp://127.0.0.1:$(rpc_port "$1")"; }
+http_url() { echo "http://127.0.0.1:$(rpc_port "$1")"; }
 rq() { "$BIN" rewards-query "$@" --node "$(rpc_url 0)" --output json 2>/dev/null; }
 
 latest_height() {
@@ -95,10 +99,12 @@ for node in 0 1 2 3; do
   ' "$genesis" >"$tmp" && mv "$tmp" "$genesis"
 done
 
-# --- 3. enable REST (+ swagger) on node0 ONLY (indexer reads node0; ports 26657/1317) ---
+# --- 3. enable REST (+ swagger) on node0 ONLY (indexer reads node0; its RPC and REST ports) ---
 api_toml="$NET/node0/config/app.toml"
 sed -i.bak -E '/^\[api\]/,/^\[/ s/^enable = false/enable = true/' "$api_toml"
 sed -i.bak -E '/^\[api\]/,/^\[/ s/^swagger = false/swagger = true/' "$api_toml"
+sed -i.bak -E "/^\[api\]/,/^\[/ s#^address = \"tcp://([^:\"]+):1317\"#address = \"tcp://\\1:$(rest_port)\"#" "$api_toml"
+grep -q "^address = \"tcp://[^:\"]*:$(rest_port)\"" "$api_toml" || { echo "app.toml [api] address was not rewritten to port $(rest_port)" >&2; exit 1; }
 rm -f "$api_toml.bak"
 
 # --- 4. start the chain and LEAVE IT RUNNING (no teardown trap) ---
@@ -122,13 +128,13 @@ cat <<EOF
 ================ rewards fixture READY (chain left running) ================
 chain-id : $CHAIN_ID
 home     : $NET
-RPC      : http://127.0.0.1:26657      (COMET_RPC_URL)
-REST     : http://127.0.0.1:1317       (REST_URL)
+RPC      : http://127.0.0.1:$(rpc_port 0)      (COMET_RPC_URL)
+REST     : http://127.0.0.1:$(rest_port)       (REST_URL)
 height   : ~$final_height   epochs finalized: $((EPOCHS_TO_RUN))   emission/epoch: $emission utwlt
 
 Ingest into the explorer (separate DB, path B):
   cd <twilight-core-explorer>
-  export COMET_RPC_URL=http://127.0.0.1:26657 REST_URL=http://127.0.0.1:1317
+  export COMET_RPC_URL=http://127.0.0.1:$(rpc_port 0) REST_URL=http://127.0.0.1:$(rest_port)
   export DATABASE_URL=postgresql://twilight:twilight@localhost:5432/twilight_explorer_rewards?schema=public
   npm run db:deploy
   START_HEIGHT=1 END_HEIGHT=$final_height npm --prefix apps/indexer run start

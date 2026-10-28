@@ -49,8 +49,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-# twilight localnet RPC port scheme (see scripts/localnet/init.sh): 26657 + i*100.
-rpc_port() { echo $((26657 + $1 * 100)); }
+# twilight localnet port scheme: scripts/localnet/lib/ports.sh.
+. "$ROOT/scripts/localnet/lib/ports.sh"
 
 rpc_get() { curl -fsS "http://127.0.0.1:$(rpc_port "$1")$2"; }
 
