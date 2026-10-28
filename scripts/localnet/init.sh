@@ -7,9 +7,17 @@ NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-localnet}"
 CHAIN_ID="${CHAIN_ID:-twilight-localnet-1}"
 # Node count is a knob so a study can build a set of a different size; every
 # existing caller leaves it alone and gets the same four-node localnet as before.
-# Ports are derived from the index, so sets stay non-overlapping only ONE AT A
-# TIME — these scripts have always assumed a single localnet per machine.
+# Ports are derived from the index (scripts/localnet/lib/ports.sh). LOCALNET_PORT_BASE
+# moves the whole band, and init refuses to start on a port that is already in use,
+# so a drill cannot bind over a node that was there first (#155).
 NODE_COUNT="${NODE_COUNT:-4}"
+. "$ROOT/scripts/localnet/lib/ports.sh"
+
+# Refuse before building or touching anything: a busy port means another
+# localnet or a live node, and wiping $NET first would destroy the evidence of
+# which. Drills that add nodes after init, or start a second chain, check those
+# ports themselves before calling this script.
+require_free_ports || { echo "init: refusing to start" >&2; exit 2; }
 
 # The build writes to $BIN, so a caller that points BIN at a binary it wants
 # PRESERVED — a published release artifact, say — would have it silently replaced
@@ -67,7 +75,7 @@ done
 peer_ids=()
 for i in $(seq 0 $((NODE_COUNT - 1))); do
   id="$("$BIN" tendermint show-node-id --home "$NET/node$i")"
-  port=$((26656 + i * 100))
+  port=$(p2p_port "$i")
   peer_ids+=("${id}@127.0.0.1:${port}")
 done
 
@@ -76,9 +84,9 @@ for i in $(seq 0 $((NODE_COUNT - 1))); do
   if [[ "$i" -ne 0 ]]; then
     cp "$genesis_home/config/genesis.json" "$home/config/genesis.json"
   fi
-  rpc=$((26657 + i * 100))
-  p2p=$((26656 + i * 100))
-  grpc=$((9090 + i * 100))
+  rpc=$(rpc_port "$i")
+  p2p=$(p2p_port "$i")
+  grpc=$(grpc_port "$i")
   peers=""
   for j in $(seq 0 $((NODE_COUNT - 1))); do
     if [[ "$j" -ne "$i" ]]; then

@@ -71,6 +71,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/localnet/lib/blockgas.sh"
+. "$ROOT/scripts/localnet/lib/ports.sh"
 
 # ---- configuration ------------------------------------------------------------
 
@@ -78,7 +79,7 @@ CAL_BIN="${CAL_BIN:-$ROOT/build/twilightd}"
 # Comma-separated RPC base URLs. The first is where transactions are broadcast and
 # blocks are read; all of them are checked for agreement, because a saturated RPC
 # node must not be mistaken for a saturated chain.
-CAL_NODES="${CAL_NODES:-http://127.0.0.1:26657,http://127.0.0.1:26757,http://127.0.0.1:26857,http://127.0.0.1:26957}"
+CAL_NODES="${CAL_NODES:-http://127.0.0.1:$(rpc_port 0),http://127.0.0.1:$(rpc_port 1),http://127.0.0.1:$(rpc_port 2),http://127.0.0.1:$(rpc_port 3)}"
 CAL_CHAIN_ID="${CAL_CHAIN_ID:-twilight-localnet-1}"
 CAL_HOME="${CAL_HOME:-/tmp/twilight-localnet/node0}"
 CAL_FUNDER="${CAL_FUNDER:-operator0}"

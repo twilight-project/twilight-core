@@ -32,7 +32,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-rpc_port() { echo $((26657 + $1 * 100)); }
+. "$ROOT/scripts/localnet/lib/ports.sh"
 rpc_url() { echo "tcp://127.0.0.1:$(rpc_port "$1")"; }
 http_url() { echo "http://127.0.0.1:$(rpc_port "$1")"; }
 node_home() { echo "$NET/node$1"; }
@@ -89,43 +89,9 @@ node_alive() {
   kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
 
-# require_free_ports refuses to start when a port this localnet will bind is
-# already in use.
-#
-# Every port here is derived from the node index and is not configurable, so a
-# drill run on a host that already carries a node competes with it for the same
-# listeners. On one rehearsal host node2's gRPC port was the port a live service
-# read through, and running as written would have taken out a production path
-# mid-gate. Losing the race is the good outcome; winning it is the bad one.
-#
-# See #155 for making the base ports configurable, which this does not do.
-require_free_ports() {
-  local n port busy=()
-  # An inspector that is ABSENT must not read as "every port is free". lsof
-  # returning non-zero is how a free port looks, and a missing lsof returns
-  # non-zero for every port — so without this the guard would report a clean
-  # bill of health on exactly the machine where it could not look.
-  if ! command -v lsof >/dev/null 2>&1; then
-    echo "refusing to start: lsof is required to check that the localnet ports are free" >&2
-    echo "  without it this guard cannot distinguish a free port from an uninspectable one," >&2
-    echo "  and these ports are fixed (see #155), so a collision would hit a live node." >&2
-    return 1
-  fi
-  for ((n = 0; n < NODE_COUNT; n++)); do
-    for port in $((26657 + n * 100)) $((26656 + n * 100)) $((9090 + n * 100)); do
-      if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-        busy+=("$port")
-      fi
-    done
-  done
-  if (( ${#busy[@]} > 0 )); then
-    echo "refusing to start: ports already in use: ${busy[*]}" >&2
-    echo "  another localnet or a live node is running; stop it, or run this in an isolated" >&2
-    echo "  network namespace. These ports are not configurable (see #155)." >&2
-    return 1
-  fi
-  return 0
-}
+# require_free_ports — the port scheme and the free-port preflight live in
+# scripts/localnet/lib/ports.sh, sourced above, so every script shares one answer
+# to "which ports" and "are they free". LOCALNET_PORT_BASE moves the band (#155).
 
 setup_localnet() {
   mkdir -p "$EVID_DIR"
@@ -154,9 +120,9 @@ join_node() {
   local rpc p2p grpc peers="" j jid
   for ((j = 0; j < i; j++)); do
     jid="$("$BIN" tendermint show-node-id --home "$(node_home "$j")")"
-    peers="${peers}${peers:+,}${jid}@127.0.0.1:$((26656 + j * 100))"
+    peers="${peers}${peers:+,}${jid}@127.0.0.1:$(p2p_port "$j")"
   done
-  rpc=$((26657 + i * 100)); p2p=$((26656 + i * 100)); grpc=$((9090 + i * 100))
+  rpc=$(rpc_port "$i"); p2p=$(p2p_port "$i"); grpc=$(grpc_port "$i")
   sed -i.bak \
     -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:${rpc}\"#" \
     -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:${p2p}\"#" \
