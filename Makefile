@@ -73,10 +73,11 @@ build-release:
 check-release-stamping:
 	./scripts/check-release-stamping.sh
 
-# Proves the CoreSlot transaction surface against a real binary: both accepted
-# consensus-key forms produce the expected Any, and the retired AutoCLI names
-# fail loudly rather than printing help and exiting zero. Runs in CI's build &
-# test job, so local and CI results cannot diverge.
+# Proves the CoreSlot and rewards transaction surfaces against a real binary:
+# both accepted consensus-key forms produce the expected Any, the canonical
+# rewards commands build their messages at both mounts, and the retired AutoCLI
+# names fail loudly rather than printing help and exiting zero. Runs in CI's
+# build & test job, so local and CI results cannot diverge.
 check-cli-surface:
 	./scripts/check-cli-surface.sh
 

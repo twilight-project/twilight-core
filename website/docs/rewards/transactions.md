@@ -4,9 +4,11 @@ title: Transactions
 
 # Rewards Transactions
 
-Rewards transactions live under `twilightd rewards <command>` (the generated
-`tx rewards` tree offers the same three as `update-rewards-params`, `pause-rewards`
-and `resume-rewards`). They wrap the messages `MsgUpdateRewardsParams`,
+Rewards transactions are `twilightd tx rewards <command>`. The root-level
+`twilightd rewards <command>` tree is the same three commands, kept for compatibility
+and used in the operator guides as the short form; the generated `update-rewards-params`,
+`pause-rewards` and `resume-rewards` spellings are gone and fail with `unknown command`.
+They wrap the messages `MsgUpdateRewardsParams`,
 `MsgPauseRewards` and `MsgResumeRewards` and nothing else; the CLI never infers or
 substitutes a signer — the message server enforces the role. The full command tables,
 including CoreSlot and settlement transactions, are on the
@@ -30,7 +32,7 @@ Queues a full `Params` update from a JSON file. The update is **queued** in
 finalizes under its existing configuration.
 
 ```bash
-twilightd rewards update-params ./params.json --from <authority> \
+twilightd tx rewards update-params ./params.json --from <authority> \
   --chain-id <chain-id> --node <rpc> --yes
 ```
 
@@ -61,8 +63,8 @@ Toggle the single canonical pause state. There are no per-area selectors: pausin
 stops reward accrual and release together.
 
 ```bash
-twilightd rewards pause  --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
-twilightd rewards resume --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
+twilightd tx rewards pause  --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
+twilightd tx rewards resume --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
 ```
 
 A transition accepted in block H takes effect at the beginning of H+1, before any

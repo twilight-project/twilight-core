@@ -155,6 +155,17 @@ func (a *App) AutoCliOpts() autocli.AppOptions {
 	if opts, ok := moduleOptions[coreslottypes.ModuleName]; ok && opts != nil {
 		opts.Tx = nil
 	}
+	// x/rewards follows the same shape, for a different reason (#144). Its
+	// generated tx tree worked, but it spelled the same three operations a second
+	// way beside the root-level hand-written ones. AppModuleBasic.GetTxCmd now
+	// supplies the hand-written tree at `tx rewards`, and the generated options
+	// are dropped here so that, as for CoreSlot, nothing depends on autocli's
+	// precedence rule to keep the duplicates from coming back. Queries are
+	// untouched: the generated ones are correct and the module supplies no custom
+	// query command.
+	if opts, ok := moduleOptions[rewardstypes.ModuleName]; ok && opts != nil {
+		opts.Tx = nil
+	}
 	return autocli.AppOptions{
 		Modules:               modules,
 		ModuleOptions:         moduleOptions,

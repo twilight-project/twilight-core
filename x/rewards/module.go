@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/runtime"
+	"github.com/spf13/cobra"
 
 	"cosmossdk.io/core/appmodule"
 
@@ -15,6 +16,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/twilight-project/twilight-core/x/rewards/client/cli"
 	"github.com/twilight-project/twilight-core/x/rewards/keeper"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -42,6 +44,24 @@ func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *g
 		panic(err)
 	}
 }
+
+// GetTxCmd supplies the hand-written rewards transaction tree, which AutoCLI
+// mounts at `tx rewards` INSTEAD OF generating one from the Msg service.
+//
+// Unlike CoreSlot (see x/coreslot/module.go), nothing here was broken: the
+// rewards messages carry no google.protobuf.Any, so the generated tree parsed
+// and worked. What it did was spell the same three operations a second way —
+// `pause-rewards`, `resume-rewards` and `update-rewards-params` beside the
+// root-level `pause`, `resume` and `update-params` — so the chain offered two
+// names for every rewards transaction, and docs, scripts and operators had to
+// pick one. #144 settled it the way #143/#145 settled CoreSlot: the hand-written
+// names are canonical at `tx rewards`, the generated spellings are gone, and the
+// root-level `twilightd rewards ...` tree stays as the compatibility surface.
+//
+// No GetQueryCmd counterpart is defined, deliberately. The generated query tree
+// is correct and already documented under its own names; displacing it would
+// move `query rewards ...` for no reason.
+func (AppModuleBasic) GetTxCmd() *cobra.Command { return cli.GetTxCmd() }
 
 func (AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
 	return cdc.MustMarshalJSON(types.DefaultGenesis())
