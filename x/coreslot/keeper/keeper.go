@@ -14,6 +14,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	gogoproto "github.com/cosmos/gogoproto/proto"
 
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/internal/economicaddress"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
@@ -356,11 +357,17 @@ func (k Keeper) ensureConsensusAvailable(ctx context.Context, any interface {
 // slot's current/old key is left in place; the caller's lifecycle transition is
 // responsible for reserving it under the normal rules. Returns the canceled
 // rotation and true when one existed.
+//
+// Absence is the only "none" case. A decode or store fault must fail closed:
+// treating corruption as "no rotation" would let Inactivate/Suspend/Remove
+// proceed while leaving a staged key in ByConsensus (the opposite of F1).
 func (k Keeper) cancelPendingRotation(ctx context.Context, slotID uint64) (types.PendingKeyRotation, bool, error) {
 	rotation, err := k.Rotations.Get(ctx, slotID)
 	if err != nil {
-		// collections returns an error when the key is absent; treat as "none".
-		return types.PendingKeyRotation{}, false, nil
+		if errors.Is(err, collections.ErrNotFound) {
+			return types.PendingKeyRotation{}, false, nil
+		}
+		return types.PendingKeyRotation{}, false, err
 	}
 	newKey, _, err := consensusKey(rotation.NewPubkey)
 	if err != nil {
@@ -373,4 +380,34 @@ func (k Keeper) cancelPendingRotation(ctx context.Context, slotID uint64) (types
 		return types.PendingKeyRotation{}, false, err
 	}
 	return rotation, true, nil
+}
+
+// reservationEndHeight returns height+lockout with checked arithmetic so a
+// configured ConsensusKeyReuseLockout cannot wrap ReservedUntil into the past
+// and silently defeat the reuse lockout.
+func reservationEndHeight(height int64, lockout uint64) (int64, error) {
+	delta, err := checked.Int64FromUint64(lockout)
+	if err != nil {
+		return 0, types.ErrInvalidParams.Wrapf("consensus_key_reuse_lockout is not representable: %v", err)
+	}
+	until, err := checked.AddInt64(height, delta)
+	if err != nil {
+		return 0, types.ErrInvalidTransition.Wrapf("consensus key reservation end height overflows: %v", err)
+	}
+	return until, nil
+}
+
+// rotationEffectiveHeight returns height+delay with checked arithmetic so a
+// configured KeyRotationDelayBlocks cannot wrap EffectiveHeight into the past
+// and apply a rotation immediately by overflow.
+func rotationEffectiveHeight(height int64, delayBlocks uint64) (int64, error) {
+	delta, err := checked.Int64FromUint64(delayBlocks)
+	if err != nil {
+		return 0, types.ErrInvalidParams.Wrapf("key_rotation_delay_blocks is not representable: %v", err)
+	}
+	effective, err := checked.AddInt64(height, delta)
+	if err != nil {
+		return 0, types.ErrInvalidTransition.Wrapf("key rotation effective height overflows: %v", err)
+	}
+	return effective, nil
 }

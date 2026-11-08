@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"encoding/hex"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -261,6 +262,93 @@ func TestRotationCancelEventEmitted(t *testing.T) {
 	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{AuthorityOrOperator: authority, SlotId: 1, Reason: "m"})
 	require.NoError(t, err)
 	require.True(t, hasEvent(ctx, types.EventTypeRotationCanceled))
+}
+
+// TestInactivateFailsClosedWhenPendingRotationUnreadable pins F1 cleanup to the
+// same absence-vs-corruption rule EndBlock already uses for due rotations: a
+// decode fault is not "no rotation", and the lifecycle transition must not
+// proceed while a staged key remains claimed in ByConsensus.
+func TestInactivateFailsClosedWhenPendingRotationUnreadable(t *testing.T) {
+	k, ctx, authority, emergency, storeKey := setupWithRawStore(t)
+	twoActiveGenesis(t, k, ctx, authority, emergency)
+	msgs := keeper.NewMsgServer(k)
+
+	newPK := pubkey(t, 9)
+	_, err := msgs.RotateConsensusKey(ctx, &types.MsgRotateConsensusKey{
+		Authority: authority, SlotId: 1, NewConsensusPubkey: newPK,
+	})
+	require.NoError(t, err)
+	stagedKey := consAddrHex(t, newPK)
+
+	corruptOnlyRawValue(t, ctx, storeKey, types.RotationsPrefix)
+
+	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{
+		AuthorityOrOperator: authority, SlotId: 1, Reason: "maintenance",
+	})
+	require.Error(t, err, "unreadable pending rotation must refuse the lifecycle change")
+
+	slot1, err := k.Slots.Get(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, types.SlotStatus_SLOT_STATUS_ACTIVE, slot1.Status,
+		"a refused inactivate must leave the slot active")
+
+	staged, err := k.ByConsensus.Has(ctx, stagedKey)
+	require.NoError(t, err)
+	require.True(t, staged, "staged consensus key must remain claimed until a readable cancel")
+}
+
+// TestReservationEndHeightOverflowRefusesRemove covers the height+lockout wrap
+// that an unchecked int64 cast would turn into a past ReservedUntil, defeating
+// the reuse lockout. MaxInt64 itself is representable and admitted by Validate;
+// adding it to a positive height is not.
+func TestReservationEndHeightOverflowRefusesRemove(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	params := types.DefaultParams(authority, emergency)
+	params.MinActiveSlots = 1
+	params.ConsensusKeyReuseLockout = math.MaxInt64
+	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
+	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
+	}, NextSlotId: 2})
+	require.NoError(t, err)
+	msgs := keeper.NewMsgServer(k)
+
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
+	require.NoError(t, err)
+
+	_, err = msgs.RemoveCoreSlot(ctx, &types.MsgRemoveCoreSlot{
+		Authority: authority, SlotId: res.SlotId, Reason: "decommission",
+	})
+	require.ErrorIs(t, err, types.ErrInvalidTransition)
+
+	slot2, err := k.Slots.Get(ctx, res.SlotId)
+	require.NoError(t, err)
+	require.NotEqual(t, types.SlotStatus_SLOT_STATUS_REMOVED, slot2.Status,
+		"overflowing reservation math must leave the slot unremoved")
+}
+
+// TestKeyRotationDelayOverflowRefusesActiveRotate is the EffectiveHeight twin of
+// the reservation wrap: a delay that cannot be added to the current height must
+// refuse the request rather than schedule a rotation in the past.
+func TestKeyRotationDelayOverflowRefusesActiveRotate(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	twoActiveGenesis(t, k, ctx, authority, emergency)
+	msgs := keeper.NewMsgServer(k)
+
+	params, err := k.Params.Get(ctx)
+	require.NoError(t, err)
+	params.KeyRotationDelayBlocks = math.MaxInt64
+	require.NoError(t, k.Params.Set(ctx, params))
+
+	_, err = msgs.RotateConsensusKey(ctx, &types.MsgRotateConsensusKey{
+		Authority: authority, SlotId: 1, NewConsensusPubkey: pubkey(t, 9),
+	})
+	require.ErrorIs(t, err, types.ErrInvalidTransition)
+
+	pending, err := k.Rotations.Has(ctx, 1)
+	require.NoError(t, err)
+	require.False(t, pending, "overflowing delay must not queue a rotation")
 }
 
 // --- F4: collapse same-key power change ---

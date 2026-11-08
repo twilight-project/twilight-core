@@ -267,6 +267,27 @@ func TestParamsBoundMaxActiveSlotsByHardCeiling(t *testing.T) {
 	require.ErrorIs(t, inverted.Validate(), types.ErrInvalidParams)
 }
 
+// TestParamsRefuseLockoutAndDelayBeyondInt64 keeps ConsensusKeyReuseLockout and
+// KeyRotationDelayBlocks inside the type they are added to (int64 block height).
+// Values above MaxInt64 would truncate under an unchecked cast.
+func TestParamsRefuseLockoutAndDelayBeyondInt64(t *testing.T) {
+	authority := sdk.AccAddress(make([]byte, 20)).String()
+	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
+
+	atMax := types.DefaultParams(authority, emergency)
+	atMax.ConsensusKeyReuseLockout = math.MaxInt64
+	atMax.KeyRotationDelayBlocks = math.MaxInt64
+	require.NoError(t, atMax.Validate(), "MaxInt64 itself is representable")
+
+	lockoutOver := types.DefaultParams(authority, emergency)
+	lockoutOver.ConsensusKeyReuseLockout = uint64(math.MaxInt64) + 1
+	require.ErrorIs(t, lockoutOver.Validate(), types.ErrInvalidParams)
+
+	delayOver := types.DefaultParams(authority, emergency)
+	delayOver.KeyRotationDelayBlocks = uint64(math.MaxInt64) + 1
+	require.ErrorIs(t, delayOver.Validate(), types.ErrInvalidParams)
+}
+
 func TestDeprecatedParamsMustCarryZeroValues(t *testing.T) {
 	authority := sdk.AccAddress(make([]byte, 20)).String()
 	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()

@@ -90,13 +90,17 @@ func (k Keeper) endBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {
 		if err != nil {
 			return nil, err
 		}
+		until, err := reservationEndHeight(height, params.ConsensusKeyReuseLockout)
+		if err != nil {
+			return nil, err
+		}
 		slot.ConsensusPubkey, slot.UpdatedHeight = rotation.NewPubkey, height
 		if err := k.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 			return nil, err
 		}
 		_ = k.ByConsensus.Remove(ctx, oldKey)
 		if err := k.Reserved.Set(ctx, oldKey, types.ReservedConsensusAddress{
-			ConsAddress: oldAddr, SlotId: slot.SlotId, ReservedUntil: height + int64(params.ConsensusKeyReuseLockout), Reason: "key rotation",
+			ConsAddress: oldAddr, SlotId: slot.SlotId, ReservedUntil: until, Reason: "key rotation",
 		}); err != nil {
 			return nil, err
 		}

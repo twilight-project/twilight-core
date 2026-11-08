@@ -86,6 +86,19 @@ func (p Params) Validate() error {
 		p.SelectionPolicyUpdateCooldownBlocks, appparams.HardMinSelectionPolicyUpdateCooldownBlocks); err != nil {
 		return ErrInvalidParams.Wrapf("%v", err)
 	}
+	// Consensus-key reuse lockout and key-rotation delay are added to an int64
+	// block height on every reservation / rotation path. Values above MaxInt64
+	// would truncate under an unchecked cast and land ReservedUntil /
+	// EffectiveHeight in the past, defeating the lockout. Zero remains legal
+	// (no lockout / immediate effect); the only hard rule is int64
+	// representability. Height+delta overflow at extreme chain heights is still
+	// refused at the write site by checked arithmetic.
+	if p.ConsensusKeyReuseLockout > math.MaxInt64 {
+		return ErrInvalidParams.Wrap("consensus_key_reuse_lockout exceeds int64")
+	}
+	if p.KeyRotationDelayBlocks > math.MaxInt64 {
+		return ErrInvalidParams.Wrap("key_rotation_delay_blocks exceeds int64")
+	}
 	return nil
 }
 

@@ -246,6 +246,12 @@ func (m msgServer) InactivateCoreSlot(ctx context.Context, msg *types.MsgInactiv
 		return nil, err
 	}
 	oldStatus := slot.Status
+	// Cancel any pending rotation before leaving ACTIVE. Fail-closed: a corrupt
+	// rotation record must refuse the lifecycle change rather than leave a
+	// staged key claimed after the slot is no longer active.
+	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
+		return nil, err
+	}
 	slot.Status, slot.ConsensusPower, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_INACTIVE, 0, sdk.UnwrapSDKContext(ctx).BlockHeight()
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 		return nil, err
@@ -253,9 +259,6 @@ func (m msgServer) InactivateCoreSlot(ctx context.Context, msg *types.MsgInactiv
 	// Leaving ACTIVE drops membership in the same state transition that writes the
 	// record, so index and status can never disagree at a block boundary.
 	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
-		return nil, err
-	}
-	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
 		return nil, err
 	}
 	emitInactivated(ctx, slot.SlotId, slot.OperatorAddress, consAddr, oldStatus, msg.Reason)
@@ -298,6 +301,12 @@ func (m msgServer) SuspendCoreSlot(ctx context.Context, msg *types.MsgSuspendCor
 	}
 	oldStatus := slot.Status
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	// Same fail-closed order as Inactivate: cancel before the status write so a
+	// corrupt pending rotation cannot leave ACTIVE membership cleared while the
+	// staged key remains claimed.
+	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
+		return nil, err
+	}
 	slot.Status, slot.ConsensusPower, slot.SuspendedHeight, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_SUSPENDED, 0, height, height
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 		return nil, err
@@ -306,9 +315,6 @@ func (m msgServer) SuspendCoreSlot(ctx context.Context, msg *types.MsgSuspendCor
 	// no-op removal for a slot that was not ACTIVE — Remove tolerates an absent
 	// key, and unconditionally clearing is what keeps the invariant total.
 	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
-		return nil, err
-	}
-	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
 		return nil, err
 	}
 	emitSuspended(ctx, slot.SlotId, slot.OperatorAddress, consAddr, oldStatus, msg.Reason)
@@ -336,6 +342,18 @@ func (m msgServer) RemoveCoreSlot(ctx context.Context, msg *types.MsgRemoveCoreS
 	}
 	oldStatus := slot.Status
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	// Reservation math and rotation cancel before any mutation: an overflowing
+	// lockout or corrupt pending rotation must leave the slot untouched.
+	until, err := reservationEndHeight(height, params.ConsensusKeyReuseLockout)
+	if err != nil {
+		return nil, err
+	}
+	// Defensive: removal is only reachable from a non-active slot, whose pending
+	// rotation (if any) was already canceled on inactivate/suspend, but cancel
+	// again so a REMOVED slot can never carry a stale rotation (F1).
+	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
+		return nil, err
+	}
 	slot.Status, slot.ConsensusPower, slot.RemovedHeight, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_REMOVED, 0, height, height
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 		return nil, err
@@ -346,16 +364,10 @@ func (m msgServer) RemoveCoreSlot(ctx context.Context, msg *types.MsgRemoveCoreS
 	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
 		return nil, err
 	}
-	// Defensive: removal is only reachable from a non-active slot, whose pending
-	// rotation (if any) was already canceled on inactivate/suspend, but cancel
-	// again so a REMOVED slot can never carry a stale rotation (F1).
-	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
-		return nil, err
-	}
 	_ = m.ByOperator.Remove(ctx, slot.OperatorAddress)
 	_ = m.ByConsensus.Remove(ctx, key)
 	if err := m.Reserved.Set(ctx, key, types.ReservedConsensusAddress{
-		ConsAddress: addr, SlotId: slot.SlotId, ReservedUntil: height + int64(params.ConsensusKeyReuseLockout), Reason: msg.Reason,
+		ConsAddress: addr, SlotId: slot.SlotId, ReservedUntil: until, Reason: msg.Reason,
 	}); err != nil {
 		return nil, err
 	}
@@ -390,6 +402,21 @@ func (m msgServer) RotateConsensusKey(ctx context.Context, msg *types.MsgRotateC
 	if err != nil {
 		return nil, err
 	}
+	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	// Delay / lockout math before claiming the new key or releasing the old one,
+	// so an overflowing parameter cannot leave ByConsensus half-updated.
+	var effectiveHeight, until int64
+	if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
+		effectiveHeight, err = rotationEffectiveHeight(height, params.KeyRotationDelayBlocks)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		until, err = reservationEndHeight(height, params.ConsensusKeyReuseLockout)
+		if err != nil {
+			return nil, err
+		}
+	}
 	newKey, _, err := m.ensureConsensusAvailable(ctx, msg.NewConsensusPubkey)
 	if err != nil {
 		return nil, err
@@ -397,9 +424,7 @@ func (m msgServer) RotateConsensusKey(ctx context.Context, msg *types.MsgRotateC
 	if err := m.ByConsensus.Set(ctx, newKey, slot.SlotId); err != nil {
 		return nil, err
 	}
-	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
 	if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
-		effectiveHeight := height + int64(params.KeyRotationDelayBlocks)
 		if err := m.Rotations.Set(ctx, slot.SlotId, types.PendingKeyRotation{
 			SlotId: slot.SlotId, OldPubkey: slot.ConsensusPubkey, NewPubkey: msg.NewConsensusPubkey,
 			RequestedHeight: height, EffectiveHeight: effectiveHeight,
@@ -415,7 +440,7 @@ func (m msgServer) RotateConsensusKey(ctx context.Context, msg *types.MsgRotateC
 		return nil, err
 	}
 	if err := m.Reserved.Set(ctx, oldKey, types.ReservedConsensusAddress{
-		ConsAddress: oldAddr, SlotId: slot.SlotId, ReservedUntil: height + int64(params.ConsensusKeyReuseLockout), Reason: "key rotation",
+		ConsAddress: oldAddr, SlotId: slot.SlotId, ReservedUntil: until, Reason: "key rotation",
 	}); err != nil {
 		return nil, err
 	}
